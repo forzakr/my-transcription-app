@@ -34,7 +34,7 @@ export default function TranscriptionApp() {
   const [userInput, setUserInput] = useState('');
   const [completedItems, setCompletedItems] = useState({});
   
-  // ★ 문장별 누적 필사 횟수 저장 { "item-1-1": 5, "item-1-2": 12, ... }
+  // 문장별 누적 필사 횟수 저장 { "item-1-1": 5, "item-1-2": 12, ... }
   const [itemStudyCounts, setItemStudyCounts] = useState({});
 
   // 정확도 및 상태 제어
@@ -46,7 +46,7 @@ export default function TranscriptionApp() {
   const [targetRepeatCount, setTargetRepeatCount] = useState(1);
   const [currentRepeatCount, setCurrentRepeatCount] = useState(0);
 
-  // ★ 데스크톱 사이드바 접기/열기 상태
+  // 데스크톱 사이드바 접기/열기 상태
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
 
   // 모바일 UI & 설정 모달
@@ -58,7 +58,7 @@ export default function TranscriptionApp() {
   const [fontFamily, setFontFamily] = useState('font-sans'); // 고딕체
   const [fontSize, setFontSize] = useState('text-lg'); // 크게
   
-  // ★ 랜덤 학습 모드 설정 (On/Off)
+  // 랜덤 학습 모드 설정 (On/Off)
   const [isRandomMode, setIsRandomMode] = useState(false);
 
   // 빈칸 암기모드 설정
@@ -68,7 +68,8 @@ export default function TranscriptionApp() {
   // 힌트 보기 상태
   const [showHint, setShowHint] = useState(false);
 
-  // 타이머 & 인출 속도
+  // ★ [신규] 뽀모도로 타이머 목표 시간 설정 (기본값: 25분)
+  const [targetTimerMinutes, setTargetTimerMinutes] = useState(25);
   const [timer, setTimer] = useState(25 * 60);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
   const [startTime, setStartTime] = useState(null);
@@ -131,17 +132,24 @@ export default function TranscriptionApp() {
     }
   }, []);
 
-  // 뽀모도로 타이머
+  // 뽀모도로 타이머 동작
   useEffect(() => {
     let interval = null;
     if (isTimerRunning && timer > 0) {
       interval = setInterval(() => setTimer(t => t - 1), 1000);
     } else if (timer === 0) {
       setIsTimerRunning(false);
-      alert('25분 몰입 세션이 완료되었습니다!');
+      alert(`${targetTimerMinutes}분 몰입 세션이 완료되었습니다!`);
     }
     return () => clearInterval(interval);
-  }, [isTimerRunning, timer]);
+  }, [isTimerRunning, timer, targetTimerMinutes]);
+
+  // ★ 타이머 분 설정 변경 시 즉시 카운트다운 초기화
+  const handleTimerMinutesChange = (mins) => {
+    setTargetTimerMinutes(mins);
+    setTimer(mins * 60);
+    setIsTimerRunning(false);
+  };
 
   // 실시간 입력 처리
   const handleInputChange = (e) => {
@@ -180,13 +188,11 @@ export default function TranscriptionApp() {
   // 다음 문장 결정 함수 (순차 vs 랜덤)
   const getNextItemId = () => {
     if (isRandomMode) {
-      // 나 자신을 제외한 아이템 중 랜덤 선택
       const otherItems = allItems.filter(item => item.id !== selectedItemId);
       if (otherItems.length === 0) return selectedItemId;
       const randomIndex = Math.floor(Math.random() * otherItems.length);
       return otherItems[randomIndex].id;
     } else {
-      // 순차 선택
       const currentIndex = allItems.findIndex(item => item.id === selectedItemId);
       if (currentIndex < allItems.length - 1) {
         return allItems[currentIndex + 1].id;
@@ -201,7 +207,6 @@ export default function TranscriptionApp() {
       e.preventDefault();
 
       if (isPass && currentItem) {
-        // ★ 1회 따라입력 완수 시마다 누적 카운트 증가 및 localStorage 저장
         const currentCount = itemStudyCounts[currentItem.id] || 0;
         const newCounts = { ...itemStudyCounts, [currentItem.id]: currentCount + 1 };
         setItemStudyCounts(newCounts);
@@ -216,7 +221,6 @@ export default function TranscriptionApp() {
           setIsPass(false);
           setShowHint(false);
         } else {
-          // 목표 횟수 달성 시 완료
           const updatedProgress = { ...completedItems, [currentItem.id]: true };
           setCompletedItems(updatedProgress);
           localStorage.setItem('transcription_progress', JSON.stringify(updatedProgress));
@@ -286,7 +290,7 @@ export default function TranscriptionApp() {
         </button>
       </div>
 
-      {/* 1. 사이드바 (트리 목차) - ★ 접기/열기 버튼 반영 및 목차 폰트 크기 연동 */}
+      {/* 1. 사이드바 (트리 목차) */}
       {isSidebarVisible && (
         <aside 
           className={`fixed md:static top-14 md:top-0 bottom-0 left-0 z-30 w-72 md:w-80 border-r flex flex-col transition-all duration-300 ${bgSidebar} ${
@@ -307,7 +311,6 @@ export default function TranscriptionApp() {
               >
                 <Settings className="w-4 h-4" />
               </button>
-              {/* 사이드바 숨기기 버튼 */}
               <button 
                 onClick={() => setIsSidebarVisible(false)}
                 className={`p-1.5 rounded-lg hover:bg-slate-800/20 transition ${textMuted}`}
@@ -348,7 +351,6 @@ export default function TranscriptionApp() {
                         >
                           <span className="truncate">{item.title}</span>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {/* 독립적인 누적 학습 횟수 표시 */}
                             {totalCount > 0 && (
                               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
                                 isSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-800 text-slate-300'
@@ -393,7 +395,6 @@ export default function TranscriptionApp() {
         
         <header className={`h-14 border-b border-inherit px-4 md:px-6 flex items-center justify-between shrink-0 ${bgSidebar}`}>
           <div className="flex items-center gap-3">
-            {/* 데스크톱 사이드바 열기 버튼 (숨겨져 있을 때만 표시) */}
             {!isSidebarVisible && (
               <button
                 onClick={() => setIsSidebarVisible(true)}
@@ -413,7 +414,6 @@ export default function TranscriptionApp() {
           </div>
 
           <div className="flex items-center justify-between w-full md:w-auto gap-4">
-            {/* 학습 모드 지표 (순차 vs 랜덤) */}
             {isRandomMode && (
               <div className="flex items-center gap-1 text-xs bg-purple-500/10 text-purple-400 px-2.5 py-1 rounded-full font-medium">
                 <Shuffle className="w-3 h-3" />
@@ -426,13 +426,21 @@ export default function TranscriptionApp() {
               <span>{retrievalSpeed} 자/분</span>
             </div>
 
+            {/* 타이머 컨트롤 */}
             <div className="flex items-center gap-2 text-xs bg-slate-500/10 px-3 py-1 rounded-full">
               <Clock className="w-3.5 h-3.5 text-blue-500" />
               <span className="font-mono font-bold">{formatTime(timer)}</span>
-              <button onClick={() => setIsTimerRunning(!isTimerRunning)} className="hover:text-blue-500 transition ml-1">
+              <button onClick={() => setIsTimerRunning(!isTimerRunning)} className="hover:text-blue-500 transition ml-1" title={isTimerRunning ? "일시정지" : "시작"}>
                 {isTimerRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
               </button>
-              <button onClick={() => { setIsTimerRunning(false); setTimer(25 * 60); }} className="hover:text-slate-400 transition">
+              <button 
+                onClick={() => { 
+                  setIsTimerRunning(false); 
+                  setTimer(targetTimerMinutes * 60); 
+                }} 
+                className="hover:text-slate-400 transition"
+                title="타이머 리셋"
+              >
                 <RotateCcw className="w-3 h-3" />
               </button>
             </div>
@@ -450,13 +458,11 @@ export default function TranscriptionApp() {
             </div>
 
             <div className="flex items-center gap-3 self-start sm:self-auto">
-              {/* 단율 문장 총 학습 횟수 */}
               <div className="bg-slate-500/10 px-3 py-1.5 rounded-lg border border-inherit text-xs font-medium">
                 <span className={textMuted}>누적 학습: </span>
                 <span className="font-bold text-emerald-500 font-mono">{itemStudyCounts[currentItem?.id] || 0}회</span>
               </div>
 
-              {/* 현재 목표 내 진행 횟수 */}
               <div className="bg-blue-500/10 px-3 py-1.5 rounded-lg border border-blue-500/20 text-xs">
                 <span className="text-blue-500 font-medium">진행: </span>
                 <span className="font-bold text-blue-600 dark:text-blue-400 font-mono text-sm">
@@ -473,7 +479,6 @@ export default function TranscriptionApp() {
                 {isBlankModeActive ? '원문 (빈칸 암기 모드)' : '법리 원문'}
               </span>
 
-              {/* 힌트 보기 버튼 */}
               {isBlankModeActive && (
                 <button
                   onMouseDown={() => setShowHint(true)}
@@ -542,7 +547,7 @@ export default function TranscriptionApp() {
             </div>
           </div>
 
-          {/* ★ 1:1 사례 적용 카드 (폰트 스타일 및 크기 설정 연동) */}
+          {/* 1:1 사례 적용 카드 */}
           <div className={`p-4 md:p-6 rounded-2xl border ${bgCard} space-y-2`}>
             <span className="text-xs font-bold text-amber-500 uppercase tracking-wider">1:1 사례 적용</span>
             <p className={`leading-relaxed ${textMuted} ${fontFamily} ${fontSize}`}>
@@ -556,7 +561,7 @@ export default function TranscriptionApp() {
       {/* 3. 환경 설정 모달 */}
       {isSettingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className={`w-full max-w-md p-6 rounded-2xl border shadow-xl ${bgCard} space-y-6`}>
+          <div className={`w-full max-w-md p-6 rounded-2xl border shadow-xl ${bgCard} space-y-6 max-h-[90vh] overflow-y-auto`}>
             <div className="flex items-center justify-between border-b border-inherit pb-3">
               <h3 className="font-bold text-base flex items-center gap-2">
                 <Settings className="w-5 h-5 text-blue-500" /> 학습 환경 설정
@@ -568,6 +573,26 @@ export default function TranscriptionApp() {
 
             <div className="space-y-4 text-xs md:text-sm">
               
+              {/* ★ [신규] 뽀모도로 타이머 목표 시간 설정 */}
+              <div className="space-y-2">
+                <label className="font-semibold block flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-blue-500" /> 뽀모도로 타이머 시간
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[15, 20, 25, 30, 50, 60].map((mins) => (
+                    <button
+                      key={mins}
+                      onClick={() => handleTimerMinutesChange(mins)}
+                      className={`p-2.5 rounded-xl border text-center font-mono transition ${
+                        targetTimerMinutes === mins ? 'border-blue-500 bg-blue-500/10 font-bold text-blue-500' : 'border-inherit'
+                      }`}
+                    >
+                      {mins}분
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* 테마 설정 */}
               <div className="space-y-2">
                 <label className="font-semibold block">색상 테마</label>
@@ -591,7 +616,7 @@ export default function TranscriptionApp() {
                 </div>
               </div>
 
-              {/* ★ 학습 순서 방식 (순차 vs 랜덤) */}
+              {/* 학습 순서 방식 (순차 vs 랜덤) */}
               <div className="space-y-2">
                 <label className="font-semibold block">문장 학습 순서</label>
                 <div className="grid grid-cols-2 gap-2">

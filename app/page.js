@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { lawData } from '@/data/lawData';
 import { 
   BookOpen, CheckCircle, Clock, Play, Pause, RotateCcw, 
-  ChevronRight, ChevronDown, Award, Settings, Menu, X, Sun, Moon, Eye, EyeOff, HelpCircle, AlertCircle, CornerDownLeft, Shuffle, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee
+  ChevronRight, ChevronDown, Award, Settings, Menu, X, Sun, Moon, Eye, EyeOff, HelpCircle, AlertCircle, CornerDownLeft, Shuffle, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb
 } from 'lucide-react';
 
 // 한글, 영어, 숫자만 남기고 띄어쓰기 및 특수문자 제거하는 정규화 함수
@@ -47,6 +47,9 @@ export default function TranscriptionApp() {
   const [isPass, setIsPass] = useState(false);
   const [showErrorAlert, setShowErrorAlert] = useState(false);
 
+  // ★ [신규] 핵심 해설 팝업(모달) 상태
+  const [showExplanationModal, setShowExplanationModal] = useState(false);
+
   // UI 제어 상태
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -55,9 +58,9 @@ export default function TranscriptionApp() {
 
   // 사용자 맞춤 설정 (기본값)
   const [theme, setTheme] = useState('dark');
-  const [fontFamily, setFontFamily] = useState('font-sans'); // font-sans | font-serif | font-mono | font-gothic
-  const [fontSizePx, setFontSizePx] = useState(18); // 기본 18px (+, - 조절)
-  const [targetRepeatCount, setTargetRepeatCount] = useState(1); // (+, - 조절)
+  const [fontFamily, setFontFamily] = useState('font-sans');
+  const [fontSizePx, setFontSizePx] = useState(18);
+  const [targetRepeatCount, setTargetRepeatCount] = useState(1);
   const [currentRepeatCount, setCurrentRepeatCount] = useState(0);
 
   // 학습 순서 및 암기 모드
@@ -66,10 +69,10 @@ export default function TranscriptionApp() {
   const [blankType, setBlankType] = useState('matchLength');
   const [showHint, setShowHint] = useState(false);
 
-  // ★ 뽀모도로 타이머 상태 (학습/휴식)
-  const [studyTimeSetting, setStudyTimeSetting] = useState(25); // 기본 25분
-  const [restTimeSetting, setRestTimeSetting] = useState(5);   // 기본 5분
-  const [timerMode, setTimerMode] = useState('study');          // 'study' | 'rest'
+  // 뽀모도로 타이머 상태 (학습/휴식)
+  const [studyTimeSetting, setStudyTimeSetting] = useState(25);
+  const [restTimeSetting, setRestTimeSetting] = useState(5);
+  const [timerMode, setTimerMode] = useState('study');
   const [timerSeconds, setTimerSeconds] = useState(25 * 60);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
 
@@ -109,7 +112,7 @@ export default function TranscriptionApp() {
     return currentItem.law;
   }, [currentItem, isBlankModeActive, blankType, showHint]);
 
-  // 설정 및 학습 데이터 LocalStorage 복원
+  // LocalStorage 복원
   useEffect(() => {
     const savedProgress = localStorage.getItem('transcription_progress');
     if (savedProgress) setCompletedItems(JSON.parse(savedProgress));
@@ -128,7 +131,7 @@ export default function TranscriptionApp() {
     if (savedRestTime) setRestTimeSetting(Number(savedRestTime));
   }, []);
 
-  // 뽀모도로 타이머 자동 전환 로직
+  // 뽀모도로 타이머
   useEffect(() => {
     let interval = null;
     if (isTimerRunning && timerSeconds > 0) {
@@ -188,7 +191,7 @@ export default function TranscriptionApp() {
   };
 
   // 다음 문장 찾기
-  const getNextItemId = () => {
+  const getNextItemId = useCallback(() => {
     if (isRandomMode) {
       const otherItems = allItems.filter(item => item.id !== selectedItemId);
       if (otherItems.length === 0) return selectedItemId;
@@ -197,51 +200,17 @@ export default function TranscriptionApp() {
       const currentIndex = allItems.findIndex(item => item.id === selectedItemId);
       return currentIndex < allItems.length - 1 ? allItems[currentIndex + 1].id : null;
     }
-  };
+  }, [allItems, isRandomMode, selectedItemId]);
 
-  // Enter 입력 시 다음 진행
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
+  // ★ 이전 문장 찾기
+  const getPrevItemId = useCallback(() => {
+    const currentIndex = allItems.findIndex(item => item.id === selectedItemId);
+    return currentIndex > 0 ? allItems[currentIndex - 1].id : null;
+  }, [allItems, selectedItemId]);
 
-      if (isPass && currentItem) {
-        const currentCount = itemStudyCounts[currentItem.id] || 0;
-        const newCounts = { ...itemStudyCounts, [currentItem.id]: currentCount + 1 };
-        setItemStudyCounts(newCounts);
-        localStorage.setItem('transcription_study_counts', JSON.stringify(newCounts));
-
-        const nextCount = currentRepeatCount + 1;
-
-        if (nextCount < targetRepeatCount) {
-          setCurrentRepeatCount(nextCount);
-          setUserInput('');
-          setAccuracy(0);
-          setIsPass(false);
-          setShowHint(false);
-        } else {
-          const updatedProgress = { ...completedItems, [currentItem.id]: true };
-          setCompletedItems(updatedProgress);
-          localStorage.setItem('transcription_progress', JSON.stringify(updatedProgress));
-
-          const nextId = getNextItemId();
-          if (nextId) {
-            setSelectedItemId(nextId);
-            setUserInput('');
-            setCurrentRepeatCount(0);
-            setAccuracy(0);
-            setIsPass(false);
-            setShowHint(false);
-          } else {
-            alert('🎉 모든 학습 문장을 완료하셨습니다!');
-          }
-        }
-      } else if (sanitizeText(userInput).length >= sanitizeText(currentItem?.law || '').length - 2) {
-        setShowErrorAlert(true);
-      }
-    }
-  };
-
-  const handleSelectItem = (id) => {
+  // 항목 변경 함수
+  const handleSelectItem = useCallback((id) => {
+    if (!id) return;
     setSelectedItemId(id);
     setUserInput('');
     setCurrentRepeatCount(0);
@@ -249,8 +218,88 @@ export default function TranscriptionApp() {
     setIsPass(false);
     setShowErrorAlert(false);
     setShowHint(false);
+    setShowExplanationModal(false);
     setIsSidebarOpen(false);
+  }, []);
+
+  // ★ 실제 다음 단계 진행 (반복 회차 처리 및 다음 문장 이동)
+  const proceedNextStep = useCallback(() => {
+    if (!currentItem) return;
+
+    const currentCount = itemStudyCounts[currentItem.id] || 0;
+    const newCounts = { ...itemStudyCounts, [currentItem.id]: currentCount + 1 };
+    setItemStudyCounts(newCounts);
+    localStorage.setItem('transcription_study_counts', JSON.stringify(newCounts));
+
+    const nextCount = currentRepeatCount + 1;
+
+    if (nextCount < targetRepeatCount) {
+      setCurrentRepeatCount(nextCount);
+      setUserInput('');
+      setAccuracy(0);
+      setIsPass(false);
+      setShowHint(false);
+      setShowExplanationModal(false);
+    } else {
+      const updatedProgress = { ...completedItems, [currentItem.id]: true };
+      setCompletedItems(updatedProgress);
+      localStorage.setItem('transcription_progress', JSON.stringify(updatedProgress));
+
+      const nextId = getNextItemId();
+      if (nextId) {
+        handleSelectItem(nextId);
+      } else {
+        setShowExplanationModal(false);
+        alert('🎉 모든 학습 문장을 완료하셨습니다!');
+      }
+    }
+  }, [currentItem, itemStudyCounts, currentRepeatCount, targetRepeatCount, completedItems, getNextItemId, handleSelectItem]);
+
+  // ★ Enter 및 단축키 핸들러
+  const handleKeyDown = (e) => {
+    // 1) 팝업이 열려있을 때 Enter 누르면 다음 문장으로 이동
+    if (showExplanationModal && e.key === 'Enter') {
+      e.preventDefault();
+      proceedNextStep();
+      return;
+    }
+
+    // 2) 입력 중 완료 상태에서 Enter 누르면 해설 팝업 오픈
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+
+      if (isPass) {
+        if (currentItem?.example) {
+          setShowExplanationModal(true); // 해설 팝업 띄우기
+        } else {
+          proceedNextStep(); // 해설 없으면 바로 이동
+        }
+      } else if (sanitizeText(userInput).length >= sanitizeText(currentItem?.law || '').length - 2) {
+        setShowErrorAlert(true);
+      }
+    }
   };
+
+  // ★ 글로벌 키보드 단축키 (화살표 좌/우로 이전/다음 문장 이동)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e) => {
+      // 텍스트 영역에 입력 중일 때는 화살표 이동을 막음 (팝업이 떠있지 않을 때)
+      const isInputActive = document.activeElement?.tagName === 'TEXTAREA';
+
+      if (!isInputActive || showExplanationModal) {
+        if (e.key === 'ArrowLeft') {
+          const prevId = getPrevItemId();
+          if (prevId) handleSelectItem(prevId);
+        } else if (e.key === 'ArrowRight') {
+          const nextId = getNextItemId();
+          if (nextId) handleSelectItem(nextId);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [getPrevItemId, getNextItemId, handleSelectItem, showExplanationModal]);
 
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -279,41 +328,41 @@ export default function TranscriptionApp() {
         </button>
       </div>
 
-      {/* 1. 사이드바 (목차) */}
+      {/* 1. 사이드바 (★ 가독성 강화된 대형 목차 영역) */}
       {isSidebarVisible && (
-        <aside className={`fixed md:static top-14 md:top-0 bottom-0 left-0 z-30 w-72 md:w-80 border-r flex flex-col transition-all duration-300 ${bgSidebar} ${
+        <aside className={`fixed md:static top-14 md:top-0 bottom-0 left-0 z-30 w-80 md:w-96 border-r flex flex-col transition-all duration-300 ${bgSidebar} ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}>
           <div className="p-4 border-b border-inherit hidden md:flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <BookOpen className="text-blue-500 w-5 h-5" />
-              <h1 className="font-bold text-sm tracking-wide">학습 목차</h1>
+              <BookOpen className="text-blue-500 w-6 h-6" />
+              <h1 className="font-bold text-base tracking-wide">학습 목차</h1>
             </div>
             <div className="flex items-center gap-1">
-              <button onClick={() => setIsSettingsOpen(true)} className={`p-1.5 rounded-lg hover:bg-slate-800/20 ${textMuted}`} title="설정">
-                <Settings className="w-4 h-4" />
+              <button onClick={() => setIsSettingsOpen(true)} className={`p-2 rounded-lg hover:bg-slate-800/20 ${textMuted}`} title="설정">
+                <Settings className="w-5 h-5" />
               </button>
-              <button onClick={() => setIsSidebarVisible(false)} className={`p-1.5 rounded-lg hover:bg-slate-800/20 ${textMuted}`} title="목차 숨기기">
-                <PanelLeftClose className="w-4 h-4" />
+              <button onClick={() => setIsSidebarVisible(false)} className={`p-2 rounded-lg hover:bg-slate-800/20 ${textMuted}`} title="목차 숨기기">
+                <PanelLeftClose className="w-5 h-5" />
               </button>
             </div>
           </div>
 
-          {/* 목차 리스트 (설정된 폰트/크기 반영) */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {/* 목차 리스트 (여백 및 폰트 개선으로 가독성 극대화) */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {lawData.chapters.map((chapter) => (
-              <div key={chapter.id} className="space-y-1">
+              <div key={chapter.id} className="space-y-1.5">
                 <button
                   onClick={() => setOpenChapters(prev => ({ ...prev, [chapter.id]: !prev[chapter.id] }))}
-                  className={`w-full flex items-center justify-between p-2 font-semibold rounded transition ${textMuted} hover:bg-blue-500/10 ${fontFamily}`}
-                  style={{ fontSize: `${Math.max(13, fontSizePx - 3)}px` }}
+                  className={`w-full flex items-center justify-between p-2.5 font-bold rounded-xl transition ${textMuted} hover:bg-blue-500/10 ${fontFamily}`}
+                  style={{ fontSize: `${Math.max(14, fontSizePx - 2)}px` }}
                 >
                   <span className="truncate">{chapter.title}</span>
-                  {openChapters[chapter.id] ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
+                  {openChapters[chapter.id] ? <ChevronDown className="w-5 h-5 shrink-0" /> : <ChevronRight className="w-5 h-5 shrink-0" />}
                 </button>
 
                 {openChapters[chapter.id] && (
-                  <div className="pl-3 space-y-1 border-l border-inherit ml-2">
+                  <div className="pl-3 space-y-1 border-l-2 border-slate-700/50 ml-2">
                     {chapter.items.map((item) => {
                       const isSelected = item.id === selectedItemId;
                       const isDone = completedItems[item.id];
@@ -323,23 +372,23 @@ export default function TranscriptionApp() {
                         <button
                           key={item.id}
                           onClick={() => handleSelectItem(item.id)}
-                          className={`w-full flex items-center justify-between p-2 rounded transition-all ${fontFamily} ${
+                          className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${fontFamily} ${
                             isSelected 
-                              ? 'bg-blue-600 text-white font-medium shadow-sm' 
-                              : `${textMuted} hover:bg-slate-500/10`
+                              ? 'bg-blue-600 text-white font-bold shadow-md ring-2 ring-blue-400/50 translate-x-1' 
+                              : `${textMuted} hover:bg-slate-500/10 hover:text-slate-200`
                           }`}
-                          style={{ fontSize: `${Math.max(12, fontSizePx - 4)}px` }}
+                          style={{ fontSize: `${Math.max(13, fontSizePx - 3)}px` }}
                         >
-                          <span className="truncate">{item.title}</span>
+                          <span className="truncate pr-2">{item.title}</span>
                           <div className="flex items-center gap-1.5 shrink-0">
                             {totalCount > 0 && (
-                              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono ${
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-semibold ${
                                 isSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-800 text-slate-300'
                               }`}>
                                 {totalCount}회
                               </span>
                             )}
-                            {isDone && <CheckCircle className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : 'text-emerald-500'}`} />}
+                            {isDone && <CheckCircle className={`w-4 h-4 ${isSelected ? 'text-white' : 'text-emerald-500'}`} />}
                           </div>
                         </button>
                       );
@@ -351,11 +400,11 @@ export default function TranscriptionApp() {
           </div>
 
           <div className="p-4 border-t border-inherit bg-inherit">
-            <div className={`flex justify-between text-xs mb-1 ${textMuted}`}>
+            <div className={`flex justify-between text-xs mb-1.5 font-medium ${textMuted}`}>
               <span>전체 학습 진도율</span>
-              <span>{Math.round((Object.keys(completedItems).length / allItems.length) * 100)}%</span>
+              <span className="font-mono font-bold">{Math.round((Object.keys(completedItems).length / allItems.length) * 100)}%</span>
             </div>
-            <div className="w-full bg-slate-700/30 h-1.5 rounded-full overflow-hidden">
+            <div className="w-full bg-slate-700/30 h-2 rounded-full overflow-hidden">
               <div className="bg-blue-500 h-full transition-all duration-300" style={{ width: `${(Object.keys(completedItems).length / allItems.length) * 100}%` }} />
             </div>
           </div>
@@ -376,10 +425,31 @@ export default function TranscriptionApp() {
               </button>
             )}
 
-            <div className="hidden md:flex items-center gap-2 text-xs text-slate-400">
-              <span>{currentChapter?.title}</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-              <span className="font-medium text-blue-500">{currentItem?.title}</span>
+            {/* ★ 이전 / 다음 문장 이동 버튼 */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleSelectItem(getPrevItemId())}
+                disabled={!getPrevItemId()}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-inherit transition ${
+                  getPrevItemId() ? 'hover:bg-slate-500/10 text-slate-200' : 'opacity-40 cursor-not-allowed text-slate-500'
+                }`}
+                title="이전 문장 (단축키: ←)"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">이전 문장</span>
+              </button>
+
+              <button
+                onClick={() => handleSelectItem(getNextItemId())}
+                disabled={!getNextItemId()}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-inherit transition ${
+                  getNextItemId() ? 'hover:bg-slate-500/10 text-slate-200' : 'opacity-40 cursor-not-allowed text-slate-500'
+                }`}
+                title="다음 문장 (단축키: →)"
+              >
+                <span className="hidden sm:inline">다음 문장</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
@@ -393,7 +463,7 @@ export default function TranscriptionApp() {
               {isFullscreen ? <Minimize className="w-4 h-4 text-amber-500" /> : <Maximize className="w-4 h-4" />}
             </button>
 
-            {/* 뽀모도로 타이머 표시 */}
+            {/* 뽀모도로 타이머 */}
             <div className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border ${
               timerMode === 'study' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
             }`}>
@@ -465,7 +535,7 @@ export default function TranscriptionApp() {
               )}
             </div>
             
-            {/* 원문 출력 (동적 폰트 크기 및 스타일 적용) */}
+            {/* 원문 출력 */}
             <div 
               className={`p-4 rounded-xl border border-inherit leading-relaxed select-none ${
                 isBlankModeActive 
@@ -500,7 +570,7 @@ export default function TranscriptionApp() {
                 <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-500 text-xs font-medium animate-bounce">
                   <span className="flex items-center gap-2">
                     <CheckCircle className="w-4 h-4 shrink-0" />
-                    작성 완료! (일치율 {accuracy}%) 다음 항목으로 넘어가려면 <strong>Enter 키</strong>를 누르세요.
+                    작성 완료! (일치율 {accuracy}%) <strong>Enter 키</strong>를 누르면 해설을 확인합니다.
                   </span>
                   <CornerDownLeft className="w-4 h-4" />
                 </div>
@@ -514,25 +584,47 @@ export default function TranscriptionApp() {
               )}
 
               <div className="flex justify-between items-center text-xs text-slate-400 px-1">
-                <span>특수문자 및 띄어쓰기는 검사 대상에서 제외됩니다.</span>
+                <span>단축키: ← 이전 문장 | → 다음 문장</span>
                 <span className="font-mono font-medium">문자 일치율: {accuracy}%</span>
               </div>
             </div>
           </div>
 
-          {/* 핵심 해설 & 적용 카드 */}
-          <div className={`p-4 md:p-6 rounded-2xl border ${bgCard} space-y-2`}>
-            <span className="text-xs font-bold text-amber-500 uppercase tracking-wider">핵심 해설 & 적용</span>
-            <p 
-              className={`leading-relaxed ${textMuted} ${fontFamily}`}
-              style={{ fontSize: `${Math.max(14, fontSizePx - 2)}px` }}
-            >
-              {currentItem?.example}
-            </p>
-          </div>
-
         </main>
       </div>
+
+      {/* ★ [신규 팝업] 1. 핵심 해설 & 적용 레이어 팝업 (Enter 입력 시 출력) */}
+      {showExplanationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className={`w-full max-w-lg p-6 rounded-2xl border shadow-2xl ${bgCard} space-y-5 border-amber-500/30`}>
+            <div className="flex items-center justify-between border-b border-inherit pb-3">
+              <h3 className="font-bold text-base flex items-center gap-2 text-amber-500">
+                <Lightbulb className="w-5 h-5" /> 핵심 해설 & 적용
+              </h3>
+              <span className="text-xs text-slate-400 font-mono">Enter를 한 번 더 누르면 이동합니다</span>
+            </div>
+
+            <div 
+              className={`p-4 rounded-xl bg-amber-500/5 border border-amber-500/20 leading-relaxed ${fontFamily}`}
+              style={{ fontSize: `${fontSizePx}px` }}
+            >
+              {currentItem?.example || '등록된 추가 해설이 없습니다.'}
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs text-slate-400 flex items-center gap-1">
+                <CornerDownLeft className="w-3.5 h-3.5" /> [Enter] 누르면 다음 단계로 진행
+              </span>
+              <button
+                onClick={proceedNextStep}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition text-xs shadow-md"
+              >
+                다음 문장으로 이동 ➔
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 3. 환경 설정 모달 */}
       {isSettingsOpen && (
@@ -549,7 +641,7 @@ export default function TranscriptionApp() {
 
             <div className="space-y-5 text-xs md:text-sm">
               
-              {/* ★ 뽀모도로 타이머 직접 입력 설정 */}
+              {/* 뽀모도로 타이머 직접 입력 설정 */}
               <div className="space-y-2 bg-slate-500/5 p-3.5 rounded-xl border border-inherit">
                 <label className="font-semibold block flex items-center gap-1.5 text-blue-400">
                   <Clock className="w-4 h-4" /> 뽀모도로 타이머 시간 설정 (분 단위)
@@ -596,7 +688,7 @@ export default function TranscriptionApp() {
                 </div>
               </div>
 
-              {/* ★ 목표 문장 반복 횟수 (+ / - 조절) */}
+              {/* 목표 문장 반복 횟수 */}
               <div className="space-y-2">
                 <label className="font-semibold block">목표 문장 반복 횟수</label>
                 <div className="flex items-center justify-between p-2 rounded-xl border border-inherit bg-slate-500/5">
@@ -616,11 +708,10 @@ export default function TranscriptionApp() {
                 </div>
               </div>
 
-              {/* ★ 폰트 스타일 & 글자 크기 실시간 통합 미리보기 */}
+              {/* 폰트 스타일 & 글자 크기 실시간 미리보기 */}
               <div className="space-y-3 bg-slate-500/5 p-3.5 rounded-xl border border-inherit">
                 <label className="font-semibold block text-emerald-400">글자 크기 & 폰트 스타일 (실시간 미리보기)</label>
                 
-                {/* 실시간 미리보기 상자 */}
                 <div 
                   className={`p-3.5 rounded-lg border border-emerald-500/30 bg-slate-950 text-slate-200 leading-relaxed overflow-hidden transition-all ${fontFamily}`}
                   style={{ fontSize: `${fontSizePx}px` }}
@@ -628,7 +719,6 @@ export default function TranscriptionApp() {
                   한글 ABC 123 :: 가나다라 필사 학습 미리보기
                 </div>
 
-                {/* 글자 크기 + / - 버튼 */}
                 <div className="flex items-center justify-between pt-1">
                   <span className="text-xs text-slate-400">글자 크기 조절:</span>
                   <div className="flex items-center gap-3">
@@ -648,7 +738,6 @@ export default function TranscriptionApp() {
                   </div>
                 </div>
 
-                {/* 폰트 스타일 그리드 선택 */}
                 <div className="space-y-1 pt-1">
                   <span className="text-xs text-slate-400">폰트 종류:</span>
                   <div className="grid grid-cols-2 gap-2">

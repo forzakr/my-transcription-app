@@ -7,6 +7,25 @@ import {
   ChevronRight, ChevronDown, Award, Settings, Menu, X, Sun, Moon, Eye, EyeOff, HelpCircle, AlertCircle, CornerDownLeft, Shuffle, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb
 } from 'lucide-react';
 
+// 한글 초성 추출 함수
+function getChosung(text) {
+  const CHOSUNG_LIST = [
+    'ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 
+    'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 
+    'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
+  ];
+  let result = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i) - 44032;
+    if (code >= 0 && code <= 11172) {
+      result += CHOSUNG_LIST[Math.floor(code / 588)];
+    } else {
+      result += text[i];
+    }
+  }
+  return result;
+}
+
 // 한글, 영어, 숫자만 남기고 띄어쓰기 및 특수문자 제거하는 정규화 함수
 function sanitizeText(text) {
   if (!text) return '';
@@ -47,7 +66,7 @@ export default function TranscriptionApp() {
   const [isPass, setIsPass] = useState(false);
   const [showErrorAlert, setShowErrorAlert] = useState(false);
 
-  // ★ [신규] 핵심 해설 팝업(모달) 상태
+  // 핵심 해설 팝업(모달) 상태
   const [showExplanationModal, setShowExplanationModal] = useState(false);
 
   // UI 제어 상태
@@ -67,9 +86,11 @@ export default function TranscriptionApp() {
   const [isRandomMode, setIsRandomMode] = useState(false);
   const [useBlankMode, setUseBlankMode] = useState(false);
   const [blankType, setBlankType] = useState('matchLength');
-  const [showHint, setShowHint] = useState(false);
+  
+  // ★ 초성 힌트 토글 상태
+  const [showChosungHint, setShowChosungHint] = useState(false);
 
-  // 뽀모도로 타이머 상태 (학습/휴식)
+  // 뽀모도로 타이머 상태
   const [studyTimeSetting, setStudyTimeSetting] = useState(25);
   const [restTimeSetting, setRestTimeSetting] = useState(5);
   const [timerMode, setTimerMode] = useState('study');
@@ -92,25 +113,49 @@ export default function TranscriptionApp() {
     return useBlankMode && targetRepeatCount > 1 && currentRepeatCount === targetRepeatCount - 1;
   }, [useBlankMode, targetRepeatCount, currentRepeatCount]);
 
-  // 화면 표시 원문 생성
+  // ★ 빈칸 마스킹 및 초성 힌트 생성 (문장당 2~3개 빈칸 제한)
   const displayedLawText = useMemo(() => {
     if (!currentItem) return '';
-    if (showHint) return currentItem.law;
 
     if (isBlankModeActive) {
       const words = currentItem.law.split(' ');
+      
+      // 2글자 이상인 단어 인덱스 추출
+      const eligibleIndices = words
+        .map((word, idx) => (word.length >= 2 ? idx : -1))
+        .filter(idx => idx !== -1);
+
+      if (eligibleIndices.length === 0) return currentItem.law;
+
+      // 마스킹할 단어 개수: 2개 ~ 3개로 제한
+      const targetCount = Math.min(Math.max(2, Math.floor(eligibleIndices.length / 3)), 3);
+      
+      // 균등한 간격으로 마스킹할 단어 선정
+      const step = Math.floor(eligibleIndices.length / targetCount);
+      const maskedIndices = new Set();
+      for (let i = 0; i < targetCount; i++) {
+        maskedIndices.add(eligibleIndices[Math.min(i * step + Math.floor(step / 2), eligibleIndices.length - 1)]);
+      }
+
       return words.map((word, idx) => {
-        if (idx % 3 === 1 && word.length >= 2) {
+        if (maskedIndices.has(idx)) {
           const targetLength = Math.min(word.length, 4);
           const restWord = word.slice(targetLength);
-          return blankType === 'fixed' ? 'OO' + restWord : 'O'.repeat(targetLength) + restWord;
+          const maskPart = word.slice(0, targetLength);
+
+          // 힌트 활성화 시 초성 출력, 미활성화 시 빈칸(OO/OOOO) 출력
+          if (showChosungHint) {
+            return `[${getChosung(maskPart)}]` + restWord;
+          } else {
+            return (blankType === 'fixed' ? 'OO' : 'O'.repeat(targetLength)) + restWord;
+          }
         }
         return word;
       }).join(' ');
     }
 
     return currentItem.law;
-  }, [currentItem, isBlankModeActive, blankType, showHint]);
+  }, [currentItem, isBlankModeActive, blankType, showChosungHint]);
 
   // LocalStorage 복원
   useEffect(() => {
@@ -202,7 +247,7 @@ export default function TranscriptionApp() {
     }
   }, [allItems, isRandomMode, selectedItemId]);
 
-  // ★ 이전 문장 찾기
+  // 이전 문장 찾기
   const getPrevItemId = useCallback(() => {
     const currentIndex = allItems.findIndex(item => item.id === selectedItemId);
     return currentIndex > 0 ? allItems[currentIndex - 1].id : null;
@@ -217,12 +262,12 @@ export default function TranscriptionApp() {
     setAccuracy(0);
     setIsPass(false);
     setShowErrorAlert(false);
-    setShowHint(false);
+    setShowChosungHint(false);
     setShowExplanationModal(false);
     setIsSidebarOpen(false);
   }, []);
 
-  // ★ 실제 다음 단계 진행 (반복 회차 처리 및 다음 문장 이동)
+  // 실제 다음 단계 진행
   const proceedNextStep = useCallback(() => {
     if (!currentItem) return;
 
@@ -238,7 +283,7 @@ export default function TranscriptionApp() {
       setUserInput('');
       setAccuracy(0);
       setIsPass(false);
-      setShowHint(false);
+      setShowChosungHint(false);
       setShowExplanationModal(false);
     } else {
       const updatedProgress = { ...completedItems, [currentItem.id]: true };
@@ -255,24 +300,24 @@ export default function TranscriptionApp() {
     }
   }, [currentItem, itemStudyCounts, currentRepeatCount, targetRepeatCount, completedItems, getNextItemId, handleSelectItem]);
 
-  // ★ Enter 및 단축키 핸들러
+  // Enter 키 핸들러
   const handleKeyDown = (e) => {
-    // 1) 팝업이 열려있을 때 Enter 누르면 다음 문장으로 이동
+    // 팝업이 열려있을 때 Enter 누르면 다음 문장으로 이동
     if (showExplanationModal && e.key === 'Enter') {
       e.preventDefault();
       proceedNextStep();
       return;
     }
 
-    // 2) 입력 중 완료 상태에서 Enter 누르면 해설 팝업 오픈
+    // 입력 중 완료 상태에서 Enter 누르면 해설 팝업 오픈
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
 
       if (isPass) {
         if (currentItem?.example) {
-          setShowExplanationModal(true); // 해설 팝업 띄우기
+          setShowExplanationModal(true);
         } else {
-          proceedNextStep(); // 해설 없으면 바로 이동
+          proceedNextStep();
         }
       } else if (sanitizeText(userInput).length >= sanitizeText(currentItem?.law || '').length - 2) {
         setShowErrorAlert(true);
@@ -280,12 +325,18 @@ export default function TranscriptionApp() {
     }
   };
 
-  // ★ 글로벌 키보드 단축키 (화살표 좌/우로 이전/다음 문장 이동)
+  // ★ 글로벌 단축키 (초성 힌트 토글: Ctrl+Space / Alt+Space, 문장 이동: ← / →)
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
-      // 텍스트 영역에 입력 중일 때는 화살표 이동을 막음 (팝업이 떠있지 않을 때)
-      const isInputActive = document.activeElement?.tagName === 'TEXTAREA';
+      // 1) Ctrl + Space 또는 Alt + Space 로 초성 힌트 토글
+      if ((e.ctrlKey || e.altKey) && e.code === 'Space') {
+        e.preventDefault();
+        setShowChosungHint(prev => !prev);
+        return;
+      }
 
+      // 2) 화살표 키로 문장 이동 (텍스트 수정 중이 아니거나 팝업이 떠있을 때)
+      const isInputActive = document.activeElement?.tagName === 'TEXTAREA';
       if (!isInputActive || showExplanationModal) {
         if (e.key === 'ArrowLeft') {
           const prevId = getPrevItemId();
@@ -328,7 +379,7 @@ export default function TranscriptionApp() {
         </button>
       </div>
 
-      {/* 1. 사이드바 (★ 가독성 강화된 대형 목차 영역) */}
+      {/* 1. 사이드바 (대형 목차 영역) */}
       {isSidebarVisible && (
         <aside className={`fixed md:static top-14 md:top-0 bottom-0 left-0 z-30 w-80 md:w-96 border-r flex flex-col transition-all duration-300 ${bgSidebar} ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
@@ -348,7 +399,6 @@ export default function TranscriptionApp() {
             </div>
           </div>
 
-          {/* 목차 리스트 (여백 및 폰트 개선으로 가독성 극대화) */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {lawData.chapters.map((chapter) => (
               <div key={chapter.id} className="space-y-1.5">
@@ -425,7 +475,6 @@ export default function TranscriptionApp() {
               </button>
             )}
 
-            {/* ★ 이전 / 다음 문장 이동 버튼 */}
             <div className="flex items-center gap-1">
               <button
                 onClick={() => handleSelectItem(getPrevItemId())}
@@ -454,7 +503,6 @@ export default function TranscriptionApp() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* 전체화면 전환 버튼 */}
             <button
               onClick={toggleFullscreen}
               className={`p-2 rounded-lg border border-inherit hover:bg-slate-500/10 transition ${textMuted}`}
@@ -463,7 +511,6 @@ export default function TranscriptionApp() {
               {isFullscreen ? <Minimize className="w-4 h-4 text-amber-500" /> : <Maximize className="w-4 h-4" />}
             </button>
 
-            {/* 뽀모도로 타이머 */}
             <div className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border ${
               timerMode === 'study' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
             }`}>
@@ -493,7 +540,7 @@ export default function TranscriptionApp() {
             <div>
               <h2 className="text-lg md:text-xl font-bold">{currentItem?.title}</h2>
               <p className={`text-xs mt-0.5 ${textMuted}`}>
-                {isBlankModeActive ? '★ 빈칸 암기 모드: 빈칸에 들어갈 주요 단어를 떠올리며 원문을 완성하세요.' : '원문을 올바르게 따라 쓰며 몰입 학습을 진행하세요.'}
+                {isBlankModeActive ? '★ 빈칸 암기 모드: 2~3개 빈칸 단어를 떠올리며 원문을 완성하세요.' : '원문을 올바르게 따라 쓰며 몰입 학습을 진행하세요.'}
               </p>
             </div>
 
@@ -520,17 +567,19 @@ export default function TranscriptionApp() {
                 {isBlankModeActive ? '학습 원문 (빈칸 암기 모드)' : '학습 원문'}
               </span>
 
+              {/* ★ 초성 힌트 보기 토글 버튼 (단축키: Ctrl + Space) */}
               {isBlankModeActive && (
                 <button
-                  onMouseDown={() => setShowHint(true)}
-                  onMouseUp={() => setShowHint(false)}
-                  onTouchStart={() => setShowHint(true)}
-                  onTouchEnd={() => setShowHint(false)}
-                  onClick={() => setShowHint(!showHint)}
-                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-600 dark:text-amber-400 font-medium select-none"
+                  onClick={() => setShowChosungHint(prev => !prev)}
+                  className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition font-medium select-none ${
+                    showChosungHint 
+                      ? 'bg-amber-500 text-slate-950 font-bold' 
+                      : 'bg-amber-500/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500/30'
+                  }`}
+                  title="단축키: Ctrl + Space 또는 Alt + Space"
                 >
                   <HelpCircle className="w-3.5 h-3.5" />
-                  {showHint ? '힌트 숨기기' : '힌트 보기 (눌러서 확인)'}
+                  {showChosungHint ? '초성 힌트 숨기기' : '초성 힌트 보기 (Ctrl+Space)'}
                 </button>
               )}
             </div>
@@ -539,8 +588,8 @@ export default function TranscriptionApp() {
             <div 
               className={`p-4 rounded-xl border border-inherit leading-relaxed select-none ${
                 isBlankModeActive 
-                  ? showHint 
-                    ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-medium' 
+                  ? showChosungHint 
+                    ? 'bg-amber-500/20 border-amber-500/50 text-amber-600 dark:text-amber-300 font-bold' 
                     : 'bg-amber-500/10 border-amber-500/30 font-bold text-amber-600 dark:text-amber-400' 
                   : 'bg-slate-500/5'
               } ${fontFamily}`}
@@ -584,7 +633,7 @@ export default function TranscriptionApp() {
               )}
 
               <div className="flex justify-between items-center text-xs text-slate-400 px-1">
-                <span>단축키: ← 이전 문장 | → 다음 문장</span>
+                <span>단축키: ←/→ 문장 이동 | Ctrl+Space 초성 힌트</span>
                 <span className="font-mono font-medium">문자 일치율: {accuracy}%</span>
               </div>
             </div>
@@ -593,9 +642,9 @@ export default function TranscriptionApp() {
         </main>
       </div>
 
-      {/* ★ [신규 팝업] 1. 핵심 해설 & 적용 레이어 팝업 (Enter 입력 시 출력) */}
+      {/* 핵심 해설 & 적용 레이어 팝업 */}
       {showExplanationModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
           <div className={`w-full max-w-lg p-6 rounded-2xl border shadow-2xl ${bgCard} space-y-5 border-amber-500/30`}>
             <div className="flex items-center justify-between border-b border-inherit pb-3">
               <h3 className="font-bold text-base flex items-center gap-2 text-amber-500">

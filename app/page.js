@@ -26,7 +26,7 @@ function getChosung(text) {
   return result;
 }
 
-// 한글, 영어, 숫자만 남기고 띄어쓰기 및 특수문자 제거 정규화 함수
+// 한글, 영어, 숫자만 남기는 정규화 함수
 function sanitizeText(text) {
   if (!text) return '';
   return text.replace(/[^가-힣a-zA-Z0-9]/g, '');
@@ -85,13 +85,15 @@ export default function TranscriptionApp() {
   // 학습 순서
   const [isRandomMode, setIsRandomMode] = useState(false);
   
-  // ★ [확장] 빈칸 암기 모드 옵션: 'none'(사용안함) | 'all'(모든 회차) | 'last'(마지막 회차만)
-  const [blankModeTiming, setBlankModeTiming] = useState('all'); 
+  // ★ [개선] 학습 모드 3가지 정립: 'normal'(일반필사) | 'chosung'(초성필사) | 'blank'(빈칸암기)
+  const [studyMode, setStudyMode] = useState('normal'); 
+  
+  // ★ [개선] 빈칸/초성 적용 시점: 'all'(모든 회차) | 'last'(마지막 회차만)
+  const [modeTiming, setModeTiming] = useState('all'); 
   const [blankType, setBlankType] = useState('matchLength');
 
-  // ★ [확장] 초성 힌트 옵션: 사용자 개별 토글 + 기본 켜짐 옵션 지원
-  const [alwaysShowChosung, setAlwaysShowChosung] = useState(false); // 기본 설정값
-  const [showChosungHint, setShowChosungHint] = useState(false);      // 단축키/버튼 토글
+  // 메인 화면 버튼 토글용 상태
+  const [showChosungHint, setShowChosungHint] = useState(false);
   const [showFullAnswer, setShowFullAnswer] = useState(false);
 
   // 뽀모도로 타이머 상태
@@ -112,34 +114,27 @@ export default function TranscriptionApp() {
     lawData.chapters.find(ch => ch.items.some(item => item.id === selectedItemId)), [selectedItemId]
   );
 
-  // ★ [개선] 빈칸 암기 모드 활성화 조건 판단
-  const isBlankModeActive = useMemo(() => {
-    if (blankModeTiming === 'none') return false;
-    if (blankModeTiming === 'all') return true;
-    if (blankModeTiming === 'last') {
+  // ★ 현재 회차에서 변형 모드(초성 or 빈칸)를 적용할 타이밍인지 판별
+  const isSpecialModeActive = useMemo(() => {
+    if (studyMode === 'normal') return false;
+    if (modeTiming === 'all') return true;
+    if (modeTiming === 'last') {
       return targetRepeatCount === 1 ? true : currentRepeatCount === targetRepeatCount - 1;
     }
     return false;
-  }, [blankModeTiming, targetRepeatCount, currentRepeatCount]);
+  }, [studyMode, modeTiming, targetRepeatCount, currentRepeatCount]);
 
-  // ★ 초성 힌트 최종 적용 여부 (기본 설정 OR 토글)
-  const isChosungActive = useMemo(() => {
-    return alwaysShowChosung || showChosungHint;
-  }, [alwaysShowChosung, showChosungHint]);
-
-  // ★ 빈칸 마스킹, 초성 힌트 및 정답 보기 텍스트 연산
+  // ★ 화면에 보여줄 원문 텍스트 연산
   const displayedLawText = useMemo(() => {
     if (!currentItem) return '';
 
-    // 1) 일반 학습 중 초성 모드만 상시 켜둔 경우
-    if (!isBlankModeActive && isChosungActive) {
-      return getChosung(currentItem.law);
-    }
+    // 정답 보기 클릭 시 전체 공개
+    if (showFullAnswer) return currentItem.law;
 
-    // 2) 빈칸 암기 모드 활성화 상태
-    if (isBlankModeActive) {
-      if (showFullAnswer) return currentItem.law;
+    // 초성 힌트 토글 또는 초성 필사 모드인 경우
+    const effectiveChosung = showChosungHint || (isSpecialModeActive && studyMode === 'chosung');
 
+    if (isSpecialModeActive) {
       const words = currentItem.law.split(' ');
       const eligibleIndices = words
         .map((word, idx) => (word.length >= 2 ? idx : -1))
@@ -160,7 +155,7 @@ export default function TranscriptionApp() {
           const restWord = word.slice(targetLength);
           const maskPart = word.slice(0, targetLength);
 
-          if (isChosungActive) {
+          if (effectiveChosung) {
             return `[${getChosung(maskPart)}]` + restWord;
           } else {
             return (blankType === 'fixed' ? 'OO' : 'O'.repeat(targetLength)) + restWord;
@@ -170,8 +165,13 @@ export default function TranscriptionApp() {
       }).join(' ');
     }
 
+    // 일반 모드에서 초성 토글만 누른 경우
+    if (showChosungHint) {
+      return getChosung(currentItem.law);
+    }
+
     return currentItem.law;
-  }, [currentItem, isBlankModeActive, isChosungActive, blankType, showFullAnswer]);
+  }, [currentItem, isSpecialModeActive, studyMode, showChosungHint, showFullAnswer, blankType]);
 
   // LocalStorage 복원
   useEffect(() => {
@@ -281,6 +281,17 @@ export default function TranscriptionApp() {
     setIsSidebarOpen(false);
   }, []);
 
+  // ★ [수정] 현재 문장 복습 함수 (입력창 및 패스 상태 깨끗이 초기화)
+  const resetCurrentSentence = useCallback(() => {
+    setUserInput('');
+    setAccuracy(0);
+    setIsPass(false);
+    setShowErrorAlert(false);
+    setShowChosungHint(false);
+    setShowFullAnswer(false);
+    setShowExplanationModal(false);
+  }, []);
+
   const proceedNextStep = useCallback(() => {
     if (!currentItem) return;
 
@@ -337,24 +348,21 @@ export default function TranscriptionApp() {
     }
   };
 
-  // ★ [디테일 추가] 글로벌 단축키 (Esc: 해설창 닫고 재학습 / Enter: 다음으로 이동 / Ctrl+Space: 초성 / ←→: 문장이동)
+  // ★ 글로벌 단축키 (Esc: 현재문장 초기화 복습 / Ctrl+Space: 초성 / ←→: 이동)
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
-      // 1) 팝업이 열려있을 때 Esc 누르면 팝업만 닫고 복습
       if (showExplanationModal && e.key === 'Escape') {
         e.preventDefault();
-        setShowExplanationModal(false);
+        resetCurrentSentence();
         return;
       }
 
-      // 2) Ctrl + Space (또는 Alt + Space) 초성 힌트 토글
       if ((e.ctrlKey || e.altKey) && e.code === 'Space') {
         e.preventDefault();
         setShowChosungHint(prev => !prev);
         return;
       }
 
-      // 3) 화살표 키 문장 이동
       const isInputActive = document.activeElement?.tagName === 'TEXTAREA';
       if (!isInputActive || showExplanationModal) {
         if (e.key === 'ArrowLeft') {
@@ -369,7 +377,7 @@ export default function TranscriptionApp() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [getPrevItemId, getNextItemId, handleSelectItem, showExplanationModal]);
+  }, [getPrevItemId, getNextItemId, handleSelectItem, showExplanationModal, resetCurrentSentence]);
 
   const formatTime = (seconds) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -398,7 +406,7 @@ export default function TranscriptionApp() {
         </button>
       </div>
 
-      {/* 1. 사이드바 (대형 목차 영역) */}
+      {/* 1. 사이드바 (목차 영역) */}
       {isSidebarVisible && (
         <aside className={`fixed md:static top-14 md:top-0 bottom-0 left-0 z-30 w-80 md:w-96 border-r flex flex-col transition-all duration-300 ${bgSidebar} ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
@@ -408,14 +416,9 @@ export default function TranscriptionApp() {
               <BookOpen className="text-blue-500 w-6 h-6" />
               <h1 className="font-bold text-base tracking-wide">학습 목차</h1>
             </div>
-            <div className="flex items-center gap-1">
-              <button onClick={() => setIsSettingsOpen(true)} className={`p-2 rounded-lg hover:bg-slate-800/20 ${textMuted}`} title="설정">
-                <Settings className="w-5 h-5" />
-              </button>
-              <button onClick={() => setIsSidebarVisible(false)} className={`p-2 rounded-lg hover:bg-slate-800/20 ${textMuted}`} title="목차 숨기기">
-                <PanelLeftClose className="w-5 h-5" />
-              </button>
-            </div>
+            <button onClick={() => setIsSidebarVisible(false)} className={`p-2 rounded-lg hover:bg-slate-800/20 ${textMuted}`} title="목차 숨기기">
+              <PanelLeftClose className="w-5 h-5" />
+            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -521,7 +524,19 @@ export default function TranscriptionApp() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* ★ [개선] 상단 헤더 우측 컨트롤 영역 (설정 버튼 추가) */}
+          <div className="flex items-center gap-2 md:gap-3">
+            {/* 설정 버튼 */}
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-inherit hover:bg-slate-500/10 transition font-medium ${textMuted}`}
+              title="학습 환경 설정"
+            >
+              <Settings className="w-4 h-4 text-blue-500" />
+              <span className="hidden sm:inline">설정</span>
+            </button>
+
+            {/* 전체화면 토글 */}
             <button
               onClick={toggleFullscreen}
               className={`p-2 rounded-lg border border-inherit hover:bg-slate-500/10 transition ${textMuted}`}
@@ -530,11 +545,12 @@ export default function TranscriptionApp() {
               {isFullscreen ? <Minimize className="w-4 h-4 text-amber-500" /> : <Maximize className="w-4 h-4" />}
             </button>
 
+            {/* 뽀모도로 타이머 */}
             <div className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border ${
               timerMode === 'study' ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
             }`}>
               {timerMode === 'study' ? <Clock className="w-3.5 h-3.5" /> : <Coffee className="w-3.5 h-3.5" />}
-              <span className="font-medium">{timerMode === 'study' ? '집중' : '휴식'}:</span>
+              <span className="font-medium hidden sm:inline">{timerMode === 'study' ? '집중' : '휴식'}:</span>
               <span className="font-mono font-bold text-sm">{formatTime(timerSeconds)}</span>
               
               <button onClick={() => setIsTimerRunning(!isTimerRunning)} className="hover:opacity-75 transition ml-1">
@@ -559,7 +575,9 @@ export default function TranscriptionApp() {
             <div>
               <h2 className="text-lg md:text-xl font-bold">{currentItem?.title}</h2>
               <p className={`text-xs mt-0.5 ${textMuted}`}>
-                {isBlankModeActive ? '★ 빈칸 암기 모드: 2~3개 빈칸 단어를 떠올리며 원문을 완성하세요.' : '원문을 올바르게 따라 쓰며 몰입 학습을 진행하세요.'}
+                {isSpecialModeActive 
+                  ? studyMode === 'blank' ? '★ 빈칸 암기 모드: 빈칸 단어를 떠올리며 원문을 완성하세요.' : '★ 초성 힌트 모드: 초성 힌트를 보며 원문을 입력하세요.'
+                  : '원문을 올바르게 따라 쓰며 몰입 필사를 진행하세요.'}
               </p>
             </div>
 
@@ -582,11 +600,11 @@ export default function TranscriptionApp() {
           <div className={`p-4 md:p-6 rounded-2xl border ${bgCard} space-y-4`}>
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1.5">
-                {isBlankModeActive ? <EyeOff className="w-4 h-4 text-amber-500" /> : <Eye className="w-4 h-4" />}
-                {isBlankModeActive ? '학습 원문 (빈칸 암기 모드)' : '학습 원문'}
+                {isSpecialModeActive ? <EyeOff className="w-4 h-4 text-amber-500" /> : <Eye className="w-4 h-4" />}
+                {isSpecialModeActive ? (studyMode === 'blank' ? '학습 원문 (빈칸 모드)' : '학습 원문 (초성 모드)') : '학습 원문'}
               </span>
 
-              {/* 초성 힌트 및 정답 보기 버튼 그룹 */}
+              {/* 힌트 및 정답 보기 버튼 그룹 */}
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
@@ -594,17 +612,17 @@ export default function TranscriptionApp() {
                     setShowFullAnswer(false);
                   }}
                   className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition font-medium select-none ${
-                    isChosungActive 
+                    showChosungHint 
                       ? 'bg-amber-500 text-slate-950 font-bold' 
                       : 'bg-amber-500/20 text-amber-600 dark:text-amber-400 hover:bg-amber-500/30'
                   }`}
                   title="단축키: Ctrl + Space"
                 >
                   <HelpCircle className="w-3.5 h-3.5" />
-                  {isChosungActive ? '초성 숨기기' : '초성 힌트'}
+                  {showChosungHint ? '초성 숨기기' : '초성 힌트'}
                 </button>
 
-                {isBlankModeActive && (
+                {isSpecialModeActive && (
                   <button
                     onClick={() => {
                       setShowFullAnswer(prev => !prev);
@@ -626,15 +644,13 @@ export default function TranscriptionApp() {
             {/* 원문 출력 */}
             <div 
               className={`p-4 rounded-xl border border-inherit leading-relaxed select-none ${
-                isBlankModeActive 
-                  ? showFullAnswer
-                    ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-bold'
-                    : isChosungActive 
-                      ? 'bg-amber-500/20 border-amber-500/50 text-amber-600 dark:text-amber-300 font-bold' 
-                      : 'bg-amber-500/10 border-amber-500/30 font-bold text-amber-600 dark:text-amber-400' 
-                  : isChosungActive
-                    ? 'bg-amber-500/10 border-amber-500/30 font-bold text-amber-400'
-                    : 'bg-slate-500/5'
+                showFullAnswer
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-bold'
+                  : isSpecialModeActive 
+                    ? 'bg-amber-500/10 border-amber-500/30 font-bold text-amber-600 dark:text-amber-400' 
+                    : showChosungHint
+                      ? 'bg-amber-500/10 border-amber-500/30 font-bold text-amber-400'
+                      : 'bg-slate-500/5'
               } ${fontFamily}`}
               style={{ fontSize: `${fontSizePx}px` }}
             >
@@ -647,7 +663,7 @@ export default function TranscriptionApp() {
                 value={userInput}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder={isBlankModeActive ? "빈칸을 채워 원문 전체를 입력 후 Enter를 누르세요..." : "위 원문과 일치하도록 입력 후 Enter를 누르세요..."}
+                placeholder={isSpecialModeActive ? "원문 전체를 정확히 입력 후 Enter를 누르세요..." : "위 원문과 일치하도록 입력 후 Enter를 누르세요..."}
                 className={`w-full h-32 p-4 rounded-xl border transition focus:outline-none focus:ring-2 resize-none ${
                   isPass 
                     ? 'border-emerald-500 focus:ring-emerald-500/50' 
@@ -684,7 +700,7 @@ export default function TranscriptionApp() {
 
         </main>
 
-        {/* ★ [신규] 하단 단축키 안내 바 (Help Bar) */}
+        {/* 하단 단축키 안내 바 */}
         <footer className={`fixed bottom-0 left-0 right-0 h-10 border-t border-inherit px-4 flex items-center justify-between z-20 text-xs ${bgSidebar}`}>
           <div className="flex items-center gap-4 text-slate-400 overflow-x-auto py-1">
             <span className="flex items-center gap-1 font-semibold text-blue-400 shrink-0">
@@ -694,13 +710,13 @@ export default function TranscriptionApp() {
             <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">Ctrl + Space</kbd> 초성 힌트</span>
             <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">Shift + Enter</kbd> 줄바꿈</span>
             <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">Enter</kbd> 검수 & 해설</span>
-            <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">Esc</kbd> 해설 닫기</span>
+            <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">Esc</kbd> 초기화 후 복습</span>
           </div>
         </footer>
 
       </div>
 
-      {/* ★ [개선] 해설 팝업 모달 (Esc 닫기 / Enter 다음 진행) */}
+      {/* ★ [수정] 해설 팝업 모달 (Esc 누르면 깨끗이 초기화 후 복습) */}
       {showExplanationModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
           <div className={`w-full max-w-2xl p-8 rounded-3xl border shadow-2xl ${bgCard} space-y-6 border-amber-500/40`}>
@@ -710,7 +726,7 @@ export default function TranscriptionApp() {
               </h3>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-400 font-mono bg-slate-800 px-3 py-1 rounded-full">Enter: 다음 | Esc: 복습</span>
-                <button onClick={() => setShowExplanationModal(false)} className="p-1 rounded-lg text-slate-400 hover:bg-slate-800">
+                <button onClick={resetCurrentSentence} className="p-1 rounded-lg text-slate-400 hover:bg-slate-800">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -725,10 +741,10 @@ export default function TranscriptionApp() {
 
             <div className="flex items-center justify-between pt-2">
               <button
-                onClick={() => setShowExplanationModal(false)}
+                onClick={resetCurrentSentence}
                 className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl transition text-xs"
               >
-                [Esc] 닫고 현재 문장 복습
+                [Esc] 초기화 후 현재 문장 복습
               </button>
               <button
                 onClick={proceedNextStep}
@@ -756,6 +772,53 @@ export default function TranscriptionApp() {
 
             <div className="space-y-5 text-xs md:text-sm">
               
+              {/* ★ [신규 개편] 학습 모드 방식 선택 (3가지) */}
+              <div className="space-y-2">
+                <label className="font-semibold block text-blue-400">기본 학습 모드</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: '일반 필사', val: 'normal' },
+                    { label: '초성 힌트', val: 'chosung' },
+                    { label: '빈칸 암기', val: 'blank' }
+                  ].map((mode) => (
+                    <button
+                      key={mode.val}
+                      onClick={() => setStudyMode(mode.val)}
+                      className={`p-2.5 rounded-xl border text-center transition ${
+                        studyMode === mode.val ? 'border-blue-500 bg-blue-500/10 font-bold text-blue-500' : 'border-inherit'
+                      }`}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* ★ [유지] 초성/빈칸 암기 모드 적용 시점 설정 */}
+              {studyMode !== 'normal' && (
+                <div className="space-y-2 bg-slate-500/5 p-3 rounded-xl border border-inherit">
+                  <label className="font-semibold block">암기 모드 적용 시점</label>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      onClick={() => setModeTiming('all')}
+                      className={`p-2 rounded-lg border text-center transition ${
+                        modeTiming === 'all' ? 'border-amber-500 bg-amber-500/10 font-bold text-amber-500' : 'border-inherit'
+                      }`}
+                    >
+                      모든 회차 적용
+                    </button>
+                    <button
+                      onClick={() => setModeTiming('last')}
+                      className={`p-2 rounded-lg border text-center transition ${
+                        modeTiming === 'last' ? 'border-amber-500 bg-amber-500/10 font-bold text-amber-500' : 'border-inherit'
+                      }`}
+                    >
+                      마지막 회차만
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* 뽀모도로 타이머 직접 입력 설정 */}
               <div className="space-y-2 bg-slate-500/5 p-3.5 rounded-xl border border-inherit">
                 <label className="font-semibold block flex items-center gap-1.5 text-blue-400">
@@ -819,51 +882,6 @@ export default function TranscriptionApp() {
                     className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
                   >
                     <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* ★ [신규 확장] 빈칸 암기 모드 정밀 설정 */}
-              <div className="space-y-2">
-                <label className="font-semibold block">빈칸 암기 모드 적용 시점</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { label: '모든 회차', val: 'all' },
-                    { label: '마지막 회차만', val: 'last' },
-                    { label: '사용 안 함', val: 'none' }
-                  ].map((opt) => (
-                    <button
-                      key={opt.val}
-                      onClick={() => setBlankModeTiming(opt.val)}
-                      className={`p-2.5 rounded-xl border text-center transition ${
-                        blankModeTiming === opt.val ? 'border-blue-500 bg-blue-500/10 font-bold text-blue-500' : 'border-inherit'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* ★ [신규 확장] 초성 힌트 상시 활성화 설정 */}
-              <div className="space-y-2">
-                <label className="font-semibold block">초성 힌트 기본 활성화</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setAlwaysShowChosung(true)}
-                    className={`p-2.5 rounded-xl border text-center transition ${
-                      alwaysShowChosung ? 'border-blue-500 bg-blue-500/10 font-bold text-blue-500' : 'border-inherit'
-                    }`}
-                  >
-                    항상 초성 표시 (ON)
-                  </button>
-                  <button
-                    onClick={() => setAlwaysShowChosung(false)}
-                    className={`p-2.5 rounded-xl border text-center transition ${
-                      !alwaysShowChosung ? 'border-blue-500 bg-blue-500/10 font-bold text-blue-500' : 'border-inherit'
-                    }`}
-                  >
-                    필요시 토글 (OFF)
                   </button>
                 </div>
               </div>

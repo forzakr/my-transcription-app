@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { lawData } from '@/data/lawData';
 import { 
   BookOpen, CheckCircle, Clock, Play, Pause, RotateCcw, 
-  ChevronRight, ChevronDown, Settings, Menu, X, Sun, Moon, Eye, AlertCircle, CornerDownLeft, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb, Keyboard, Trash2, Type, StretchHorizontal
+  ChevronRight, ChevronDown, Menu, X, Sun, Moon, Eye, EyeOff, AlertCircle, CornerDownLeft, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb, Keyboard, Trash2, Type, StretchHorizontal, Shuffle, Repeat, Flame
 } from 'lucide-react';
 
 // 한글 초성 추출 함수
@@ -27,13 +27,13 @@ function getChosung(text) {
   return result;
 }
 
-// 한글, 영어, 숫자만 남기는 정규화 함수 (띄어쓰기/특수문자 제외)
+// 한글, 영어, 숫자만 남기는 정규화 함수
 function sanitizeText(text) {
   if (!text) return '';
   return text.replace(/[^가-힣a-zA-Z0-9]/g, '');
 }
 
-// 실시간 일치율(정확도) 계산 함수
+// 실시간 일치율 계산
 function calculateRealtimeAccuracy(userInput, targetText) {
   const cleanInput = sanitizeText(userInput);
   const cleanTarget = sanitizeText(targetText);
@@ -66,16 +66,15 @@ export default function TranscriptionApp() {
   const [isPass, setIsPass] = useState(false);
   const [showErrorAlert, setShowErrorAlert] = useState(false);
 
-  // TAB 키로 여닫는 해설 패널 토글 상태
+  // TAB 키 해설 토글
   const [showExplanation, setShowExplanation] = useState(false);
 
   // UI 제어 상태
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // ★ 가로폭 모드: 'normal'(기본) | 'wide'(넓게) | 'full'(최대)
+  // 가로폭 제어
   const [containerWidth, setContainerWidth] = useState('max-w-4xl');
 
   // 스타일 설정
@@ -88,7 +87,7 @@ export default function TranscriptionApp() {
   // 학습 순서 (순차 vs 랜덤)
   const [isRandomMode, setIsRandomMode] = useState(false);
   
-  // ★ 3가지 학습 모드: 'normal'(일반필사) | 'chosung'(초성힌트) | 'blank'(빈칸암기)
+  // 3가지 학습 모드: 'normal'(일반필사) | 'chosung'(초성힌트) | 'blank'(빈칸암기)
   const [studyMode, setStudyMode] = useState('normal'); 
   const [modeTiming, setModeTiming] = useState('all'); 
   const [blankType, setBlankType] = useState('matchLength');
@@ -103,6 +102,11 @@ export default function TranscriptionApp() {
   const [timerSeconds, setTimerSeconds] = useState(25 * 60);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
 
+  // ★ 뽀모도로 오늘 누적 집중 학습 시간 (초 단위) 및 미니 팝업 상태
+  const [todayPomoSeconds, setTodayPomoSeconds] = useState(0);
+  const [showPomoPopover, setShowPomoPopover] = useState(false);
+  const pomoPopoverRef = useRef(null);
+
   // 데이터 평탄화
   const allItems = useMemo(() => lawData.chapters.flatMap(ch => ch.items), []);
 
@@ -114,7 +118,7 @@ export default function TranscriptionApp() {
     lawData.chapters.find(ch => ch.items.some(item => item.id === selectedItemId)), [selectedItemId]
   );
 
-  // 변형 모드(초성 or 빈칸) 적용 타이밍 판별
+  // 변형 모드 적용 타이밍 판별
   const isSpecialModeActive = useMemo(() => {
     if (studyMode === 'normal') return false;
     if (modeTiming === 'all') return true;
@@ -124,7 +128,7 @@ export default function TranscriptionApp() {
     return false;
   }, [studyMode, modeTiming, targetRepeatCount, currentRepeatCount]);
 
-  // ★ [수정됨] 오류 없는 안전한 원문 출력 텍스트 연산 (일반 / 초성 / 빈칸)
+  // 원문 출력 텍스트 연산
   const displayedLawText = useMemo(() => {
     if (!currentItem || !currentItem.law) return '';
     if (showFullAnswer || !isSpecialModeActive) return currentItem.law;
@@ -132,7 +136,6 @@ export default function TranscriptionApp() {
     const words = currentItem.law.split(' ');
     if (words.length === 0) return currentItem.law;
 
-    // 2글자 이상인 단어들만 마스킹 대상으로 추출
     const eligibleIndices = [];
     words.forEach((word, idx) => {
       if (word && word.length >= 2) {
@@ -142,7 +145,6 @@ export default function TranscriptionApp() {
 
     if (eligibleIndices.length === 0) return currentItem.law;
 
-    // 2~3개 단어 선정
     const targetCount = Math.min(Math.max(2, Math.floor(eligibleIndices.length / 3)), 3);
     const step = Math.max(1, Math.floor(eligibleIndices.length / targetCount));
     const maskedIndices = new Set();
@@ -160,12 +162,10 @@ export default function TranscriptionApp() {
         const restWord = word.slice(targetLength);
         const maskPart = word.slice(0, targetLength);
 
-        // 초성 힌트 모드일 때
         if (studyMode === 'chosung') {
           return `[${getChosung(maskPart)}]` + restWord;
         }
         
-        // 빈칸 암기 모드일 때
         if (studyMode === 'blank') {
           return (blankType === 'fixed' ? 'OO' : 'O'.repeat(targetLength)) + restWord;
         }
@@ -203,9 +203,58 @@ export default function TranscriptionApp() {
 
     const savedRestTime = localStorage.getItem('pomo_rest_time');
     if (savedRestTime) setRestTimeSetting(Number(savedRestTime));
+
+    const todayDate = new Date().toDateString();
+    const savedDate = localStorage.getItem('pomo_today_date');
+    if (savedDate === todayDate) {
+      const savedTodaySec = localStorage.getItem('pomo_today_seconds');
+      if (savedTodaySec) setTodayPomoSeconds(Number(savedTodaySec));
+    } else {
+      localStorage.setItem('pomo_today_date', todayDate);
+      localStorage.setItem('pomo_today_seconds', '0');
+    }
   }, []);
 
-  // 폰트 크기 및 스타일, 가로폭 변경 핸들러
+  // 뽀모도로 타이머 동작 & 오늘 누적 시간 합산
+  useEffect(() => {
+    let interval = null;
+    if (isTimerRunning && timerSeconds > 0) {
+      interval = setInterval(() => {
+        setTimerSeconds(s => s - 1);
+        if (timerMode === 'study') {
+          setTodayPomoSeconds(sec => {
+            const next = sec + 1;
+            localStorage.setItem('pomo_today_seconds', next.toString());
+            return next;
+          });
+        }
+      }, 1000);
+    } else if (timerSeconds === 0 && isTimerRunning) {
+      if (timerMode === 'study') {
+        alert(`🎉 ${studyTimeSetting}분 집중 학습 완료! ${restTimeSetting}분 휴식 시작!`);
+        setTimerMode('rest');
+        setTimerSeconds(restTimeSetting * 60);
+      } else {
+        alert(`☕ ${restTimeSetting}분 휴식 종료! 다시 집중 학습 시작!`);
+        setTimerMode('study');
+        setTimerSeconds(studyTimeSetting * 60);
+      }
+    }
+    return () => clearInterval(interval);
+  }, [isTimerRunning, timerSeconds, timerMode, studyTimeSetting, restTimeSetting]);
+
+  // 팝오버 외부 클릭 감지 시 닫기
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (pomoPopoverRef.current && !pomoPopoverRef.current.contains(e.target)) {
+        setShowPomoPopover(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // 폰트 크기 및 스타일, 가로폭 핸들러
   const handleFontSizeChange = (delta) => {
     setFontSizePx((prev) => {
       const next = Math.max(12, Math.min(32, prev + delta));
@@ -235,25 +284,6 @@ export default function TranscriptionApp() {
       return next;
     });
   };
-
-  // 뽀모도로 타이머
-  useEffect(() => {
-    let interval = null;
-    if (isTimerRunning && timerSeconds > 0) {
-      interval = setInterval(() => setTimerSeconds(s => s - 1), 1000);
-    } else if (timerSeconds === 0 && isTimerRunning) {
-      if (timerMode === 'study') {
-        alert(`🎉 ${studyTimeSetting}분 집중 학습 완료! ${restTimeSetting}분 휴식 시작!`);
-        setTimerMode('rest');
-        setTimerSeconds(restTimeSetting * 60);
-      } else {
-        alert(`☕ ${restTimeSetting}분 휴식 종료! 다시 집중 학습 시작!`);
-        setTimerMode('study');
-        setTimerSeconds(studyTimeSetting * 60);
-      }
-    }
-    return () => clearInterval(interval);
-  }, [isTimerRunning, timerSeconds, timerMode, studyTimeSetting, restTimeSetting]);
 
   // 전체화면 토글
   const toggleFullscreen = () => {
@@ -377,7 +407,7 @@ export default function TranscriptionApp() {
     }
   }, [currentItem, itemStudyCounts, currentRepeatCount, targetRepeatCount, completedItems, getNextItemId, handleSelectItem]);
 
-  // Tab 키로 해설 열기/닫기 & Enter 키로 다음 진행
+  // Tab 키 해설 & Enter 키 진행
   const handleKeyDown = (e) => {
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -427,6 +457,13 @@ export default function TranscriptionApp() {
     return `${m}:${s}`;
   };
 
+  const formatHoursMins = (seconds) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    if (h > 0) return `${h}시간 ${m}분`;
+    return `${m}분`;
+  };
+
   const isDark = theme === 'dark';
   const bgMain = isDark ? 'bg-slate-900 text-slate-100' : 'bg-slate-50 text-slate-800';
   const bgSidebar = isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200';
@@ -443,12 +480,15 @@ export default function TranscriptionApp() {
           {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
         <span className="font-bold text-sm tracking-tight text-slate-200">스마트 필사 스튜디오</span>
-        <button onClick={() => setIsSettingsOpen(true)} className="p-2 rounded-lg bg-slate-800/50 text-slate-200">
-          <Settings className="w-5 h-5" />
+        <button 
+          onClick={() => setTheme(isDark ? 'light' : 'dark')} 
+          className="p-2 rounded-lg bg-slate-800/50 text-slate-200"
+        >
+          {isDark ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-blue-400" />}
         </button>
       </div>
 
-      {/* 1. 사이드바 */}
+      {/* 1. 사이드바 (★ 목차 폰트 크기는 독립 고정) */}
       {isSidebarVisible && (
         <aside className={`fixed md:static top-14 md:top-0 bottom-0 left-0 z-30 w-80 md:w-96 border-r flex flex-col transition-all duration-300 shrink-0 ${bgSidebar} ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
@@ -463,16 +503,16 @@ export default function TranscriptionApp() {
             </button>
           </div>
 
+          {/* 목차 리스트는 본문 글자 크기와 독립된 표준 크기(text-sm) 유지 */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {lawData.chapters.map((chapter) => (
               <div key={chapter.id} className="space-y-1.5">
                 <button
                   onClick={() => setOpenChapters(prev => ({ ...prev, [chapter.id]: !prev[chapter.id] }))}
-                  className={`w-full flex items-center justify-between p-2.5 font-bold rounded-xl transition ${textMuted} hover:bg-blue-500/10 ${fontFamily}`}
-                  style={{ fontSize: `${Math.max(14, fontSizePx - 2)}px` }}
+                  className={`w-full flex items-center justify-between p-2.5 font-bold text-sm rounded-xl transition ${textMuted} hover:bg-blue-500/10`}
                 >
                   <span className="truncate">{chapter.title}</span>
-                  {openChapters[chapter.id] ? <ChevronDown className="w-5 h-5 shrink-0" /> : <ChevronRight className="w-5 h-5 shrink-0" />}
+                  {openChapters[chapter.id] ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
                 </button>
 
                 {openChapters[chapter.id] && (
@@ -486,17 +526,16 @@ export default function TranscriptionApp() {
                         <button
                           key={item.id}
                           onClick={() => handleSelectItem(item.id)}
-                          className={`w-full flex items-center justify-between p-3 rounded-xl transition-all ${fontFamily} ${
+                          className={`w-full flex items-center justify-between p-2.5 rounded-xl text-xs transition-all ${
                             isSelected 
                               ? 'bg-blue-600 text-white font-bold shadow-md ring-2 ring-blue-400/50 translate-x-1' 
                               : `${textMuted} hover:bg-slate-500/10 hover:text-slate-200`
                           }`}
-                          style={{ fontSize: `${Math.max(13, fontSizePx - 3)}px` }}
                         >
                           <span className="truncate pr-2">{item.title}</span>
                           <div className="flex items-center gap-1.5 shrink-0">
                             {totalCount > 0 && (
-                              <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-semibold ${
+                              <span className={`px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold ${
                                 isSelected ? 'bg-blue-700 text-blue-100' : 'bg-slate-800 text-slate-300'
                               }`}>
                                 {totalCount}회
@@ -542,7 +581,7 @@ export default function TranscriptionApp() {
       {/* 2. 메인 영역 */}
       <div className="flex-1 flex flex-col h-full pt-14 md:pt-0 overflow-hidden">
         
-        {/* 상단 헤더 */}
+        {/* 상단 통합 헤더 (모든 설정 도구가 밖으로 나와 직관적 제어 가능) */}
         <header className={`h-16 border-b border-inherit px-4 md:px-6 flex items-center justify-between shrink-0 ${bgSidebar}`}>
           <div className="flex items-center gap-3">
             {!isSidebarVisible && (
@@ -579,52 +618,139 @@ export default function TranscriptionApp() {
             </div>
           </div>
 
+          {/* 우측 인라인 제어 툴바 */}
           <div className="flex items-center gap-2 md:gap-3">
-            {/* 고시인성 뽀모도로 타이머 */}
-            <div className={`flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border transition-all ${
-              timerMode === 'study' 
-                ? 'bg-blue-950/60 border-blue-500/50 text-blue-300 ring-1 ring-blue-500/20' 
-                : 'bg-amber-950/60 border-amber-500/50 text-amber-300 ring-1 ring-amber-500/20'
-            }`}>
-              <div className="flex items-center gap-1.5">
-                {timerMode === 'study' ? <Clock className="w-4 h-4 text-blue-400 animate-pulse" /> : <Coffee className="w-4 h-4 text-amber-400" />}
-                <span className="text-xs font-black uppercase tracking-wider hidden md:inline">
-                  {timerMode === 'study' ? '집중' : '휴식'}
+            
+            {/* ★ 문장 출제 순서 (순차 / 랜덤 원클릭 토글) */}
+            <button
+              onClick={() => setIsRandomMode(prev => !prev)}
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition ${
+                isRandomMode 
+                  ? 'border-purple-500/50 bg-purple-500/10 text-purple-400' 
+                  : 'border-inherit bg-slate-500/5 text-slate-400 hover:text-slate-200'
+              }`}
+              title="문장 출제 순서 토글"
+            >
+              <Shuffle className="w-3.5 h-3.5" />
+              <span>{isRandomMode ? '랜덤 추출' : '순차 진행'}</span>
+            </button>
+
+            {/* ★ 뽀모도로 시계 (클릭 시 미니 팝업으로 시간 설정 & 오늘 누적 시간 통계 표시) */}
+            <div className="relative" ref={pomoPopoverRef}>
+              <div 
+                onClick={() => setShowPomoPopover(prev => !prev)}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-2xl border transition-all cursor-pointer select-none ${
+                  timerMode === 'study' 
+                    ? 'bg-blue-950/60 border-blue-500/50 text-blue-300 ring-1 ring-blue-500/20' 
+                    : 'bg-amber-950/60 border-amber-500/50 text-amber-300 ring-1 ring-amber-500/20'
+                }`}
+                title="클릭하여 타이머 설정 및 오늘 누적 시간 확인"
+              >
+                <div className="flex items-center gap-1.5">
+                  {timerMode === 'study' ? <Clock className="w-4 h-4 text-blue-400 animate-pulse" /> : <Coffee className="w-4 h-4 text-amber-400" />}
+                  <span className="text-xs font-black uppercase tracking-wider hidden md:inline">
+                    {timerMode === 'study' ? '집중' : '휴식'}
+                  </span>
+                </div>
+                
+                <span className="font-mono font-black text-base md:text-lg tracking-tight text-white drop-shadow">
+                  {formatTime(timerSeconds)}
                 </span>
+                
+                <div className="flex items-center gap-1 border-l border-inherit pl-2 ml-1" onClick={(e) => e.stopPropagation()}>
+                  <button 
+                    onClick={() => setIsTimerRunning(!isTimerRunning)} 
+                    className={`p-1 rounded-lg hover:bg-white/10 transition ${isTimerRunning ? 'text-amber-400' : 'text-emerald-400'}`}
+                    title={isTimerRunning ? "일시정지" : "시작"}
+                  >
+                    {isTimerRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                  </button>
+                  <button 
+                    onClick={() => { 
+                      setIsTimerRunning(false); 
+                      setTimerSeconds((timerMode === 'study' ? studyTimeSetting : restTimeSetting) * 60); 
+                    }} 
+                    className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition"
+                    title="타이머 리셋"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              
-              <span className="font-mono font-black text-base md:text-lg tracking-tight text-white drop-shadow">
-                {formatTime(timerSeconds)}
-              </span>
-              
-              <div className="flex items-center gap-1 border-l border-inherit pl-2 ml-1">
-                <button 
-                  onClick={() => setIsTimerRunning(!isTimerRunning)} 
-                  className={`p-1 rounded-lg hover:bg-white/10 transition ${isTimerRunning ? 'text-amber-400' : 'text-emerald-400'}`}
-                  title={isTimerRunning ? "일시정지" : "시작"}
-                >
-                  {isTimerRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                </button>
-                <button 
-                  onClick={() => { 
-                    setIsTimerRunning(false); 
-                    setTimerSeconds((timerMode === 'study' ? studyTimeSetting : restTimeSetting) * 60); 
-                  }} 
-                  className="p-1 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition"
-                  title="타이머 리셋"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                </button>
-              </div>
+
+              {/* ★ 뽀모도로 미니 팝업창 (시간 조절 & 오늘 공부 통계) */}
+              {showPomoPopover && (
+                <div className={`absolute right-0 mt-2 w-72 p-4 rounded-2xl border shadow-2xl z-50 animate-fadeIn ${bgCard} border-blue-500/30 space-y-4`}>
+                  <div className="flex items-center justify-between border-b border-inherit pb-2">
+                    <span className="font-bold text-xs flex items-center gap-1.5 text-blue-400">
+                      <Clock className="w-4 h-4" /> 뽀모도로 설정 & 통계
+                    </span>
+                    <button onClick={() => setShowPomoPopover(false)} className="text-slate-400 hover:text-white">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* 오늘 집중 통계 */}
+                  <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Flame className="w-4 h-4 text-amber-500" />
+                      <span className="text-xs font-semibold text-slate-300">오늘 누적 집중</span>
+                    </div>
+                    <span className="font-mono font-bold text-sm text-amber-400">{formatHoursMins(todayPomoSeconds)}</span>
+                  </div>
+
+                  {/* 집중 & 휴식 시간 직접 조절 */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-[11px] text-slate-400 block mb-1">집중 시간 (분)</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="180"
+                        value={studyTimeSetting}
+                        onChange={(e) => {
+                          const val = Math.max(1, Number(e.target.value));
+                          setStudyTimeSetting(val);
+                          localStorage.setItem('pomo_study_time', val);
+                          if (timerMode === 'study') {
+                            setTimerSeconds(val * 60);
+                            setIsTimerRunning(false);
+                          }
+                        }}
+                        className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-center font-bold text-blue-400 focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[11px] text-slate-400 block mb-1">휴식 시간 (분)</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="60"
+                        value={restTimeSetting}
+                        onChange={(e) => {
+                          const val = Math.max(1, Number(e.target.value));
+                          setRestTimeSetting(val);
+                          localStorage.setItem('pomo_rest_time', val);
+                          if (timerMode === 'rest') {
+                            setTimerSeconds(val * 60);
+                            setIsTimerRunning(false);
+                          }
+                        }}
+                        className="w-full p-2 rounded-lg border border-slate-700 bg-slate-900 text-center font-bold text-amber-400 focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* 설정 버튼 */}
+            {/* 테마 전환 (다크 / 라이트) */}
             <button
-              onClick={() => setIsSettingsOpen(true)}
+              onClick={() => setTheme(isDark ? 'light' : 'dark')}
               className={`p-2 rounded-xl border border-inherit hover:bg-slate-500/10 transition font-medium ${textMuted}`}
-              title="학습 환경 설정"
+              title={isDark ? "밝은 모드로 전환" : "어두운 모드로 전환"}
             >
-              <Settings className="w-4 h-4 text-blue-500" />
+              {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-blue-400" />}
             </button>
 
             {/* 전체화면 버튼 */}
@@ -638,11 +764,12 @@ export default function TranscriptionApp() {
           </div>
         </header>
 
-        {/* 중앙 본문 영역 (가로폭 동적 제어) */}
+        {/* 중앙 본문 영역 */}
         <main className="flex-1 overflow-y-auto p-4 md:p-8 w-full space-y-6 flex flex-col items-center">
           
           <div className={`w-full ${containerWidth} space-y-6 transition-all duration-200`}>
             
+            {/* 제목 & 상단 상태 바 */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-inherit pb-3">
               <div>
                 <h2 className="text-lg md:text-xl font-bold">{currentItem?.title}</h2>
@@ -671,7 +798,7 @@ export default function TranscriptionApp() {
             {/* 학습 카드 영역 */}
             <div className={`p-4 md:p-6 rounded-2xl border ${bgCard} space-y-4`}>
               
-              {/* 상단 통합 툴바: 모드 선택 + 폰트 + 글자크기 + 너비조절 + 해설토글 */}
+              {/* 상단 통합 제어 툴바 (설정 모달 대신 모든 옵션이 여기에 상시 노출) */}
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-inherit pb-3">
                 
                 {/* 3가지 학습 모드 즉시 전환 탭 */}
@@ -693,9 +820,41 @@ export default function TranscriptionApp() {
                   ))}
                 </div>
 
-                {/* 우측 컨트롤 (폰트, 크기, 너비, 해설) */}
+                {/* 우측 세부 제어 컨트롤 */}
                 <div className="flex items-center gap-1.5 flex-wrap">
                   
+                  {/* 암기모드 적용 시점 토글 (모든 회차 / 마지막 회차만) */}
+                  {studyMode !== 'normal' && (
+                    <button
+                      onClick={() => setModeTiming(prev => prev === 'all' ? 'last' : 'all')}
+                      className="px-2 py-1 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-500 text-xs font-medium"
+                      title="암기모드 적용 시점 토글"
+                    >
+                      {modeTiming === 'all' ? '매 회차 적용' : '마지막 회차만'}
+                    </button>
+                  )}
+
+                  {/* 목표 반복 횟수 - / + 조절 */}
+                  <div className="flex items-center bg-slate-500/10 rounded-lg border border-inherit p-0.5 text-xs">
+                    <button
+                      onClick={() => setTargetRepeatCount(prev => Math.max(1, prev - 1))}
+                      className="px-1.5 py-0.5 rounded hover:bg-slate-500/20 text-slate-300 font-bold"
+                      title="반복 횟수 감소"
+                    >
+                      <Minus className="w-3 h-3" />
+                    </button>
+                    <span className="px-1.5 font-mono font-semibold text-blue-400">
+                      {targetRepeatCount}회
+                    </span>
+                    <button
+                      onClick={() => setTargetRepeatCount(prev => prev + 1)}
+                      className="px-1.5 py-0.5 rounded hover:bg-slate-500/20 text-slate-300 font-bold"
+                      title="반복 횟수 증가"
+                    >
+                      <Plus className="w-3 h-3" />
+                    </button>
+                  </div>
+
                   {/* 폰트 선택 */}
                   <div className="flex items-center gap-1 bg-slate-500/10 px-2 py-1 rounded-lg border border-inherit text-xs">
                     <Type className="w-3.5 h-3.5 text-slate-400" />
@@ -715,7 +874,7 @@ export default function TranscriptionApp() {
                     <button
                       onClick={() => handleFontSizeChange(-1)}
                       className="px-2 py-0.5 rounded hover:bg-slate-500/20 text-xs font-bold transition"
-                      title="글자 작게"
+                      title="본문 글자 작게"
                     >
                       A-
                     </button>
@@ -725,17 +884,17 @@ export default function TranscriptionApp() {
                     <button
                       onClick={() => handleFontSizeChange(1)}
                       className="px-2 py-0.5 rounded hover:bg-slate-500/20 text-xs font-bold transition"
-                      title="글자 크게"
+                      title="본문 글자 크게"
                     >
                       A+
                     </button>
                   </div>
 
-                  {/* 가로폭 토글 버튼 */}
+                  {/* 가로폭 토글 */}
                   <button
                     onClick={handleToggleWidth}
                     className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-inherit hover:bg-slate-500/20 transition ${textMuted}`}
-                    title="입력창 가로폭 조절 (기본/넓게/최대)"
+                    title="입력창 가로폭 조절"
                   >
                     <StretchHorizontal className="w-3.5 h-3.5 text-blue-400" />
                     <span className="hidden sm:inline">
@@ -743,7 +902,7 @@ export default function TranscriptionApp() {
                     </span>
                   </button>
 
-                  {/* 해설 토글 버튼 */}
+                  {/* 해설 토글 */}
                   <button
                     onClick={() => setShowExplanation(prev => !prev)}
                     className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition font-medium select-none ${
@@ -774,7 +933,7 @@ export default function TranscriptionApp() {
                 </div>
               </div>
               
-              {/* 원문 출력 */}
+              {/* 원문 출력 (본문 폰트 크기 동적 반영) */}
               <div 
                 className={`p-4 rounded-xl border border-inherit leading-relaxed select-none ${
                   showFullAnswer
@@ -806,7 +965,7 @@ export default function TranscriptionApp() {
                 </div>
               )}
 
-              {/* 입력 영역 (자유 리사이징 지원: resize: both) */}
+              {/* 입력 영역 (자유 크기 조절 지원: resize: both) */}
               <div className="space-y-2">
                 <textarea
                   value={userInput}
@@ -845,7 +1004,7 @@ export default function TranscriptionApp() {
                 )}
 
                 <div className="flex justify-between items-center text-xs text-slate-400 px-1">
-                  <span>우측 하단을 드래그하여 입력창 크기(가로/세로)를 자유롭게 조절할 수 있습니다.</span>
+                  <span>우측 하단을 드래그하여 입력창 크기를 조절할 수 있습니다.</span>
                   <span className="font-mono font-medium">문자 일치율: {accuracy}%</span>
                 </div>
               </div>
@@ -869,209 +1028,6 @@ export default function TranscriptionApp() {
         </footer>
 
       </div>
-
-      {/* 3. 환경 설정 모달 */}
-      {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className={`w-full max-w-md p-6 rounded-2xl border shadow-xl ${bgCard} space-y-6 max-h-[90vh] overflow-y-auto`}>
-            <div className="flex items-center justify-between border-b border-inherit pb-3">
-              <h3 className="font-bold text-base flex items-center gap-2">
-                <Settings className="w-5 h-5 text-blue-500" /> 학습 환경 설정
-              </h3>
-              <button onClick={() => setIsSettingsOpen(false)} className={`p-1 rounded-lg ${textMuted} hover:bg-slate-500/20`}>
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-5 text-xs md:text-sm">
-              
-              {/* 학습 진도 초기화 */}
-              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center justify-between">
-                <div>
-                  <span className="font-bold text-rose-400 block">오늘의 학습 진행도 초기화</span>
-                  <span className="text-[11px] text-slate-400">완료 체크를 리셋하여 중복 없이 다시 처음부터 진행합니다.</span>
-                </div>
-                <button
-                  onClick={() => {
-                    handleResetProgress();
-                    setIsSettingsOpen(false);
-                  }}
-                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-lg transition text-xs shrink-0"
-                >
-                  초기화
-                </button>
-              </div>
-
-              {/* 기본 학습 모드 선택 (일반 / 초성 / 빈칸) */}
-              <div className="space-y-2">
-                <label className="font-semibold block text-blue-400">기본 학습 모드</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { label: '일반 필사', val: 'normal' },
-                    { label: '초성 힌트', val: 'chosung' },
-                    { label: '빈칸 암기', val: 'blank' }
-                  ].map((mode) => (
-                    <button
-                      key={mode.val}
-                      onClick={() => handleStudyModeChange(mode.val)}
-                      className={`p-2.5 rounded-xl border text-center transition ${
-                        studyMode === mode.val ? 'border-blue-500 bg-blue-500/10 font-bold text-blue-500' : 'border-inherit'
-                      }`}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {studyMode !== 'normal' && (
-                <div className="space-y-2 bg-slate-500/5 p-3 rounded-xl border border-inherit">
-                  <label className="font-semibold block">암기 모드 적용 시점</label>
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <button
-                      onClick={() => setModeTiming('all')}
-                      className={`p-2 rounded-lg border text-center transition ${
-                        modeTiming === 'all' ? 'border-amber-500 bg-amber-500/10 font-bold text-amber-500' : 'border-inherit'
-                      }`}
-                    >
-                      모든 회차 적용
-                    </button>
-                    <button
-                      onClick={() => setModeTiming('last')}
-                      className={`p-2 rounded-lg border text-center transition ${
-                        modeTiming === 'last' ? 'border-amber-500 bg-amber-500/10 font-bold text-amber-500' : 'border-inherit'
-                      }`}
-                    >
-                      마지막 회차만
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* 문장 학습 순서 (순차 vs 랜덤) */}
-              <div className="space-y-2">
-                <label className="font-semibold block">문장 출제 순서</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setIsRandomMode(false)}
-                    className={`p-2.5 rounded-xl border text-center transition ${
-                      !isRandomMode ? 'border-blue-500 bg-blue-500/10 font-bold text-blue-500' : 'border-inherit'
-                    }`}
-                  >
-                    순차 진행 (목차 순)
-                  </button>
-                  <button
-                    onClick={() => setIsRandomMode(true)}
-                    className={`p-2.5 rounded-xl border text-center transition ${
-                      isRandomMode ? 'border-blue-500 bg-blue-500/10 font-bold text-blue-500' : 'border-inherit'
-                    }`}
-                  >
-                    랜덤 추출 (중복 없음)
-                  </button>
-                </div>
-              </div>
-
-              {/* 뽀모도로 타이머 직접 입력 */}
-              <div className="space-y-2 bg-slate-500/5 p-3.5 rounded-xl border border-inherit">
-                <label className="font-semibold block flex items-center gap-1.5 text-blue-400">
-                  <Clock className="w-4 h-4" /> 뽀모도로 타이머 시간 설정 (분 단위)
-                </label>
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div>
-                    <span className="text-xs text-slate-400 block mb-1">집중 공부 시간 (분)</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="180"
-                      value={studyTimeSetting}
-                      onChange={(e) => {
-                        const val = Math.max(1, Number(e.target.value));
-                        setStudyTimeSetting(val);
-                        localStorage.setItem('pomo_study_time', val);
-                        if (timerMode === 'study') {
-                          setTimerSeconds(val * 60);
-                          setIsTimerRunning(false);
-                        }
-                      }}
-                      className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-900 text-center font-bold text-blue-400 focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-xs text-slate-400 block mb-1">쉬는 시간 (분)</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="60"
-                      value={restTimeSetting}
-                      onChange={(e) => {
-                        const val = Math.max(1, Number(e.target.value));
-                        setRestTimeSetting(val);
-                        localStorage.setItem('pomo_rest_time', val);
-                        if (timerMode === 'rest') {
-                          setTimerSeconds(val * 60);
-                          setIsTimerRunning(false);
-                        }
-                      }}
-                      className="w-full p-2.5 rounded-lg border border-slate-700 bg-slate-900 text-center font-bold text-amber-400 focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* 목표 문장 반복 횟수 */}
-              <div className="space-y-2">
-                <label className="font-semibold block">목표 문장 반복 횟수</label>
-                <div className="flex items-center justify-between p-2 rounded-xl border border-inherit bg-slate-500/5">
-                  <button 
-                    onClick={() => setTargetRepeatCount(prev => Math.max(1, prev - 1))}
-                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-                  >
-                    <Minus className="w-4 h-4" />
-                  </button>
-                  <span className="font-bold text-base font-mono text-blue-400">{targetRepeatCount} 회</span>
-                  <button 
-                    onClick={() => setTargetRepeatCount(prev => prev + 1)}
-                    className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* 색상 테마 */}
-              <div className="space-y-2">
-                <label className="font-semibold block">색상 테마</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => setTheme('dark')}
-                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border transition ${
-                      isDark ? 'border-blue-500 bg-blue-500/10 text-blue-400 font-bold' : 'border-inherit'
-                    }`}
-                  >
-                    <Moon className="w-4 h-4" /> 어둡게 (Dark)
-                  </button>
-                  <button
-                    onClick={() => setTheme('light')}
-                    className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border transition ${
-                      !isDark ? 'border-blue-500 bg-blue-500/10 text-blue-600 font-bold' : 'border-inherit'
-                    }`}
-                  >
-                    <Sun className="w-4 h-4" /> 밝게 (Light)
-                  </button>
-                </div>
-              </div>
-
-            </div>
-
-            <button
-              onClick={() => setIsSettingsOpen(false)}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition text-sm shadow-md"
-            >
-              설정 완료
-            </button>
-          </div>
-        </div>
-      )}
 
     </div>
   );

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { lawData } from '@/data/lawData';
 import { 
   BookOpen, CheckCircle, Clock, Play, Pause, RotateCcw, 
-  ChevronRight, ChevronDown, Menu, X, Sun, Moon, Eye, EyeOff, AlertCircle, CornerDownLeft, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb, Keyboard, Trash2, Type, StretchHorizontal, Shuffle, Repeat, Flame
+  ChevronRight, ChevronDown, Menu, X, Sun, Moon, Eye, EyeOff, AlertCircle, CornerDownLeft, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb, Keyboard, Trash2, Type, StretchHorizontal, Shuffle, ListOrdered, Flame
 } from 'lucide-react';
 
 // 한글 초성 추출 함수
@@ -66,7 +66,7 @@ export default function TranscriptionApp() {
   const [isPass, setIsPass] = useState(false);
   const [showErrorAlert, setShowErrorAlert] = useState(false);
 
-  // TAB 키 해설 토글
+  // TAB 키 해설 토글 상태
   const [showExplanation, setShowExplanation] = useState(false);
 
   // UI 제어 상태
@@ -102,7 +102,7 @@ export default function TranscriptionApp() {
   const [timerSeconds, setTimerSeconds] = useState(25 * 60);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
 
-  // ★ 뽀모도로 오늘 누적 집중 학습 시간 (초 단위) 및 미니 팝업 상태
+  // 뽀모도로 오늘 누적 시간 & 팝오버 상태
   const [todayPomoSeconds, setTodayPomoSeconds] = useState(0);
   const [showPomoPopover, setShowPomoPopover] = useState(false);
   const pomoPopoverRef = useRef(null);
@@ -128,10 +128,15 @@ export default function TranscriptionApp() {
     return false;
   }, [studyMode, modeTiming, targetRepeatCount, currentRepeatCount]);
 
+  // ★ [개선 1] Tab 키(해설 열림) 또는 정답 보기 클릭 시 정답 공개 연동
+  const isAnswerRevealed = useMemo(() => {
+    return showFullAnswer || showExplanation;
+  }, [showFullAnswer, showExplanation]);
+
   // 원문 출력 텍스트 연산
   const displayedLawText = useMemo(() => {
     if (!currentItem || !currentItem.law) return '';
-    if (showFullAnswer || !isSpecialModeActive) return currentItem.law;
+    if (isAnswerRevealed || !isSpecialModeActive) return currentItem.law;
 
     const words = currentItem.law.split(' ');
     if (words.length === 0) return currentItem.law;
@@ -172,7 +177,7 @@ export default function TranscriptionApp() {
       }
       return word;
     }).join(' ');
-  }, [currentItem, isSpecialModeActive, studyMode, showFullAnswer, blankType]);
+  }, [currentItem, isSpecialModeActive, studyMode, isAnswerRevealed, blankType]);
 
   // LocalStorage 데이터 복원
   useEffect(() => {
@@ -215,7 +220,7 @@ export default function TranscriptionApp() {
     }
   }, []);
 
-  // 뽀모도로 타이머 동작 & 오늘 누적 시간 합산
+  // 뽀모도로 타이머 동작
   useEffect(() => {
     let interval = null;
     if (isTimerRunning && timerSeconds > 0) {
@@ -243,7 +248,7 @@ export default function TranscriptionApp() {
     return () => clearInterval(interval);
   }, [isTimerRunning, timerSeconds, timerMode, studyTimeSetting, restTimeSetting]);
 
-  // 팝오버 외부 클릭 감지 시 닫기
+  // 팝오버 외부 클릭 닫기
   useEffect(() => {
     function handleClickOutside(e) {
       if (pomoPopoverRef.current && !pomoPopoverRef.current.contains(e.target)) {
@@ -254,7 +259,6 @@ export default function TranscriptionApp() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // 폰트 크기 및 스타일, 가로폭 핸들러
   const handleFontSizeChange = (delta) => {
     setFontSizePx((prev) => {
       const next = Math.max(12, Math.min(32, prev + delta));
@@ -285,7 +289,6 @@ export default function TranscriptionApp() {
     });
   };
 
-  // 전체화면 토글
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(() => {});
@@ -298,7 +301,6 @@ export default function TranscriptionApp() {
     }
   };
 
-  // 학습 진행상황 초기화
   const handleResetProgress = () => {
     if (window.confirm('오늘의 학습 진행도(완료 체크)를 초기화하시겠습니까?\n(※ 개별 문장의 누적 필사 횟수는 유지됩니다.)')) {
       setCompletedItems({});
@@ -312,7 +314,6 @@ export default function TranscriptionApp() {
     }
   };
 
-  // 중복 없는 랜덤 추출 & 순차 다음 문장
   const getNextItemId = useCallback(() => {
     if (isRandomMode) {
       const remainingItems = allItems.filter(item => !completedItems[item.id] && item.id !== selectedItemId);
@@ -348,7 +349,6 @@ export default function TranscriptionApp() {
     setIsSidebarOpen(false);
   }, []);
 
-  // 실시간 입력 처리
   const handleInputChange = (e) => {
     const val = e.target.value;
     setUserInput(val);
@@ -375,7 +375,6 @@ export default function TranscriptionApp() {
     }
   };
 
-  // 다음 단계 진행
   const proceedNextStep = useCallback(() => {
     if (!currentItem) return;
 
@@ -488,7 +487,7 @@ export default function TranscriptionApp() {
         </button>
       </div>
 
-      {/* 1. 사이드바 (★ 목차 폰트 크기는 독립 고정) */}
+      {/* 1. 사이드바 (목차 폰트 크기는 독립 고정) */}
       {isSidebarVisible && (
         <aside className={`fixed md:static top-14 md:top-0 bottom-0 left-0 z-30 w-80 md:w-96 border-r flex flex-col transition-all duration-300 shrink-0 ${bgSidebar} ${
           isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
@@ -503,7 +502,6 @@ export default function TranscriptionApp() {
             </button>
           </div>
 
-          {/* 목차 리스트는 본문 글자 크기와 독립된 표준 크기(text-sm) 유지 */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {lawData.chapters.map((chapter) => (
               <div key={chapter.id} className="space-y-1.5">
@@ -581,7 +579,7 @@ export default function TranscriptionApp() {
       {/* 2. 메인 영역 */}
       <div className="flex-1 flex flex-col h-full pt-14 md:pt-0 overflow-hidden">
         
-        {/* 상단 통합 헤더 (모든 설정 도구가 밖으로 나와 직관적 제어 가능) */}
+        {/* 상단 통합 헤더 */}
         <header className={`h-16 border-b border-inherit px-4 md:px-6 flex items-center justify-between shrink-0 ${bgSidebar}`}>
           <div className="flex items-center gap-3">
             {!isSidebarVisible && (
@@ -618,10 +616,9 @@ export default function TranscriptionApp() {
             </div>
           </div>
 
-          {/* 우측 인라인 제어 툴바 */}
           <div className="flex items-center gap-2 md:gap-3">
             
-            {/* ★ 문장 출제 순서 (순차 / 랜덤 원클릭 토글) */}
+            {/* ★ [개선 2] 순차 진행(ListOrdered) vs 랜덤 추출(Shuffle) 전용 아이콘 분리 */}
             <button
               onClick={() => setIsRandomMode(prev => !prev)}
               className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition ${
@@ -631,11 +628,15 @@ export default function TranscriptionApp() {
               }`}
               title="문장 출제 순서 토글"
             >
-              <Shuffle className="w-3.5 h-3.5" />
+              {isRandomMode ? (
+                <Shuffle className="w-3.5 h-3.5 text-purple-400" />
+              ) : (
+                <ListOrdered className="w-3.5 h-3.5 text-blue-400" />
+              )}
               <span>{isRandomMode ? '랜덤 추출' : '순차 진행'}</span>
             </button>
 
-            {/* ★ 뽀모도로 시계 (클릭 시 미니 팝업으로 시간 설정 & 오늘 누적 시간 통계 표시) */}
+            {/* 뽀모도로 시계 (클릭 시 팝오버) */}
             <div className="relative" ref={pomoPopoverRef}>
               <div 
                 onClick={() => setShowPomoPopover(prev => !prev)}
@@ -678,7 +679,7 @@ export default function TranscriptionApp() {
                 </div>
               </div>
 
-              {/* ★ 뽀모도로 미니 팝업창 (시간 조절 & 오늘 공부 통계) */}
+              {/* 뽀모도로 미니 팝업창 */}
               {showPomoPopover && (
                 <div className={`absolute right-0 mt-2 w-72 p-4 rounded-2xl border shadow-2xl z-50 animate-fadeIn ${bgCard} border-blue-500/30 space-y-4`}>
                   <div className="flex items-center justify-between border-b border-inherit pb-2">
@@ -690,7 +691,6 @@ export default function TranscriptionApp() {
                     </button>
                   </div>
 
-                  {/* 오늘 집중 통계 */}
                   <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Flame className="w-4 h-4 text-amber-500" />
@@ -699,7 +699,6 @@ export default function TranscriptionApp() {
                     <span className="font-mono font-bold text-sm text-amber-400">{formatHoursMins(todayPomoSeconds)}</span>
                   </div>
 
-                  {/* 집중 & 휴식 시간 직접 조절 */}
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
                       <span className="text-[11px] text-slate-400 block mb-1">집중 시간 (분)</span>
@@ -744,7 +743,7 @@ export default function TranscriptionApp() {
               )}
             </div>
 
-            {/* 테마 전환 (다크 / 라이트) */}
+            {/* 테마 전환 */}
             <button
               onClick={() => setTheme(isDark ? 'light' : 'dark')}
               className={`p-2 rounded-xl border border-inherit hover:bg-slate-500/10 transition font-medium ${textMuted}`}
@@ -798,7 +797,7 @@ export default function TranscriptionApp() {
             {/* 학습 카드 영역 */}
             <div className={`p-4 md:p-6 rounded-2xl border ${bgCard} space-y-4`}>
               
-              {/* 상단 통합 제어 툴바 (설정 모달 대신 모든 옵션이 여기에 상시 노출) */}
+              {/* 상단 통합 제어 툴바 */}
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-inherit pb-3">
                 
                 {/* 3가지 학습 모드 즉시 전환 탭 */}
@@ -823,7 +822,7 @@ export default function TranscriptionApp() {
                 {/* 우측 세부 제어 컨트롤 */}
                 <div className="flex items-center gap-1.5 flex-wrap">
                   
-                  {/* 암기모드 적용 시점 토글 (모든 회차 / 마지막 회차만) */}
+                  {/* 암기모드 적용 시점 토글 */}
                   {studyMode !== 'normal' && (
                     <button
                       onClick={() => setModeTiming(prev => prev === 'all' ? 'last' : 'all')}
@@ -834,7 +833,7 @@ export default function TranscriptionApp() {
                     </button>
                   )}
 
-                  {/* 목표 반복 횟수 - / + 조절 */}
+                  {/* 목표 반복 횟수 조절 */}
                   <div className="flex items-center bg-slate-500/10 rounded-lg border border-inherit p-0.5 text-xs">
                     <button
                       onClick={() => setTargetRepeatCount(prev => Math.max(1, prev - 1))}
@@ -902,7 +901,7 @@ export default function TranscriptionApp() {
                     </span>
                   </button>
 
-                  {/* 해설 토글 */}
+                  {/* ★ [개선 1] 해설 토글 (누르면 해설 열림 + 초성/빈칸 정답 동시 공개) */}
                   <button
                     onClick={() => setShowExplanation(prev => !prev)}
                     className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition font-medium select-none ${
@@ -910,14 +909,14 @@ export default function TranscriptionApp() {
                         ? 'bg-amber-500 text-slate-950 font-bold shadow-sm' 
                         : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
                     }`}
-                    title="단축키: TAB 키"
+                    title="단축키: TAB 키 (해설 및 정답 보기)"
                   >
                     <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
-                    <span>해설 (Tab)</span>
+                    <span>해설 & 정답 (Tab)</span>
                   </button>
 
-                  {/* 빈칸 모드일 때 정답 보기 */}
-                  {isSpecialModeActive && studyMode === 'blank' && (
+                  {/* 변형 모드일 때 정답 보기 개별 버튼 */}
+                  {isSpecialModeActive && (
                     <button
                       onClick={() => setShowFullAnswer(prev => !prev)}
                       className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition font-medium select-none ${
@@ -933,10 +932,10 @@ export default function TranscriptionApp() {
                 </div>
               </div>
               
-              {/* 원문 출력 (본문 폰트 크기 동적 반영) */}
+              {/* 원문 출력 (Tab 키 또는 정답 보기 시 초록색 하이라이트로 정답 공개) */}
               <div 
                 className={`p-4 rounded-xl border border-inherit leading-relaxed select-none ${
-                  showFullAnswer
+                  isAnswerRevealed
                     ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-bold'
                     : isSpecialModeActive 
                       ? 'bg-amber-500/10 border-amber-500/30 font-bold text-amber-600 dark:text-amber-400' 
@@ -952,7 +951,7 @@ export default function TranscriptionApp() {
                 <div className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 space-y-2 animate-fadeIn transition-all">
                   <div className="flex items-center justify-between text-amber-500 text-xs font-bold uppercase tracking-wider">
                     <span className="flex items-center gap-1.5">
-                      <Lightbulb className="w-4 h-4" /> 핵심 해설 & 적용
+                      <Lightbulb className="w-4 h-4" /> 핵심 해설 & 적용 (정답 공개 중)
                     </span>
                     <span className="text-[11px] font-normal text-amber-400/80">Tab 키를 누르면 닫힙니다</span>
                   </div>
@@ -965,7 +964,7 @@ export default function TranscriptionApp() {
                 </div>
               )}
 
-              {/* 입력 영역 (자유 크기 조절 지원: resize: both) */}
+              {/* 입력 영역 */}
               <div className="space-y-2">
                 <textarea
                   value={userInput}
@@ -973,7 +972,7 @@ export default function TranscriptionApp() {
                   onKeyDown={handleKeyDown}
                   placeholder={
                     isSpecialModeActive
-                      ? (studyMode === 'chosung' ? "초성 힌트를 참고하여 원문 전체를 입력 후 Enter를 누르세요..." : "빈칸을 채워 원문 전체를 입력 후 Enter를 누르세요...")
+                      ? (studyMode === 'chosung' ? "초성 힌트를 참고하여 원문 전체를 입력 후 Enter를 누르세요... (정답/해설: Tab)" : "빈칸을 채워 원문 전체를 입력 후 Enter를 누르세요... (정답/해설: Tab)")
                       : "위 원문과 일치하도록 입력 후 Enter를 누르세요... (해설 확인: Tab)"
                   }
                   className={`w-full min-h-[140px] p-4 rounded-xl border transition focus:outline-none focus:ring-2 ${
@@ -1020,7 +1019,7 @@ export default function TranscriptionApp() {
             <span className="flex items-center gap-1 font-semibold text-blue-400 shrink-0">
               <Keyboard className="w-3.5 h-3.5" /> 단축키:
             </span>
-            <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">Tab</kbd> 해설 열기/닫기</span>
+            <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">Tab</kbd> 해설 & 정답 보기</span>
             <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">← / →</kbd> 이전/다음 문장 이동</span>
             <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">Shift + Enter</kbd> 줄바꿈</span>
             <span className="shrink-0"><kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-200">Enter</kbd> 완료 시 다음 문장</span>

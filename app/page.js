@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { lawData } from '@/data/lawData';
 import { 
   BookOpen, CheckCircle, Clock, Play, Pause, RotateCcw, 
-  ChevronRight, ChevronDown, Menu, X, Sun, Moon, Eye, EyeOff, AlertCircle, CornerDownLeft, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb, Keyboard, Trash2, Type, StretchHorizontal, Shuffle, ListOrdered, Flame
+  ChevronRight, ChevronDown, Menu, X, Sun, Moon, AlertCircle, CornerDownLeft, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb, Keyboard, Trash2, Type, StretchHorizontal, Shuffle, ListOrdered, Flame
 } from 'lucide-react';
 
 // 한글 초성 추출 함수
@@ -66,7 +66,7 @@ export default function TranscriptionApp() {
   const [isPass, setIsPass] = useState(false);
   const [showErrorAlert, setShowErrorAlert] = useState(false);
 
-  // TAB 키 해설 토글 상태
+  // TAB 키 해설 및 정답 토글 상태
   const [showExplanation, setShowExplanation] = useState(false);
 
   // UI 제어 상태
@@ -91,9 +91,6 @@ export default function TranscriptionApp() {
   const [studyMode, setStudyMode] = useState('normal'); 
   const [modeTiming, setModeTiming] = useState('all'); 
   const [blankType, setBlankType] = useState('matchLength');
-
-  // 정답 보기 토글
-  const [showFullAnswer, setShowFullAnswer] = useState(false);
 
   // 뽀모도로 타이머 상태
   const [studyTimeSetting, setStudyTimeSetting] = useState(25);
@@ -128,10 +125,10 @@ export default function TranscriptionApp() {
     return false;
   }, [studyMode, modeTiming, targetRepeatCount, currentRepeatCount]);
 
-  // ★ [개선 1] Tab 키(해설 열림) 또는 정답 보기 클릭 시 정답 공개 연동
+  // Tab 키로 해설이 열리면 자동으로 정답 공개
   const isAnswerRevealed = useMemo(() => {
-    return showFullAnswer || showExplanation;
-  }, [showFullAnswer, showExplanation]);
+    return showExplanation;
+  }, [showExplanation]);
 
   // 원문 출력 텍스트 연산
   const displayedLawText = useMemo(() => {
@@ -274,7 +271,6 @@ export default function TranscriptionApp() {
 
   const handleStudyModeChange = (val) => {
     setStudyMode(val);
-    setShowFullAnswer(false);
     localStorage.setItem('transcription_study_mode', val);
   };
 
@@ -344,7 +340,6 @@ export default function TranscriptionApp() {
     setAccuracy(0);
     setIsPass(false);
     setShowErrorAlert(false);
-    setShowFullAnswer(false);
     setShowExplanation(false);
     setIsSidebarOpen(false);
   }, []);
@@ -390,7 +385,6 @@ export default function TranscriptionApp() {
       setUserInput('');
       setAccuracy(0);
       setIsPass(false);
-      setShowFullAnswer(false);
       setShowExplanation(false);
     } else {
       const updatedProgress = { ...completedItems, [currentItem.id]: true };
@@ -618,7 +612,7 @@ export default function TranscriptionApp() {
 
           <div className="flex items-center gap-2 md:gap-3">
             
-            {/* ★ [개선 2] 순차 진행(ListOrdered) vs 랜덤 추출(Shuffle) 전용 아이콘 분리 */}
+            {/* 문장 출제 순서 토글 */}
             <button
               onClick={() => setIsRandomMode(prev => !prev)}
               className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition ${
@@ -901,7 +895,7 @@ export default function TranscriptionApp() {
                     </span>
                   </button>
 
-                  {/* ★ [개선 1] 해설 토글 (누르면 해설 열림 + 초성/빈칸 정답 동시 공개) */}
+                  {/* 해설 및 정답 보기 토글 버튼 */}
                   <button
                     onClick={() => setShowExplanation(prev => !prev)}
                     className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition font-medium select-none ${
@@ -914,25 +908,10 @@ export default function TranscriptionApp() {
                     <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
                     <span>해설 & 정답 (Tab)</span>
                   </button>
-
-                  {/* 변형 모드일 때 정답 보기 개별 버튼 */}
-                  {isSpecialModeActive && (
-                    <button
-                      onClick={() => setShowFullAnswer(prev => !prev)}
-                      className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition font-medium select-none ${
-                        showFullAnswer 
-                          ? 'bg-emerald-500 text-slate-950 font-bold' 
-                          : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/30'
-                      }`}
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                      {showFullAnswer ? '정답 숨기기' : '정답 보기'}
-                    </button>
-                  )}
                 </div>
               </div>
               
-              {/* 원문 출력 (Tab 키 또는 정답 보기 시 초록색 하이라이트로 정답 공개) */}
+              {/* 원문 출력 */}
               <div 
                 className={`p-4 rounded-xl border border-inherit leading-relaxed select-none ${
                   isAnswerRevealed

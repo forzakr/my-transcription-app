@@ -4,8 +4,28 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { lawData } from '@/data/lawData';
 import { 
   BookOpen, CheckCircle, Clock, Play, Pause, RotateCcw, 
-  ChevronRight, ChevronDown, Settings, Menu, X, Sun, Moon, Eye, AlertCircle, CornerDownLeft, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb, Keyboard, Trash2, Type
+  ChevronRight, ChevronDown, Settings, Menu, X, Sun, Moon, Eye, AlertCircle, CornerDownLeft, PanelLeftClose, PanelLeft, Maximize, Minimize, Plus, Minus, Coffee, ArrowLeft, ArrowRight, Lightbulb, Keyboard, Trash2, Type, StretchHorizontal
 } from 'lucide-react';
+
+// 한글 초성 추출 함수
+function getChosung(text) {
+  if (!text) return '';
+  const CHOSUNG_LIST = [
+    'ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 
+    'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 
+    'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'
+  ];
+  let result = '';
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i) - 44032;
+    if (code >= 0 && code <= 11172) {
+      result += CHOSUNG_LIST[Math.floor(code / 588)];
+    } else {
+      result += text[i];
+    }
+  }
+  return result;
+}
 
 // 한글, 영어, 숫자만 남기는 정규화 함수 (띄어쓰기/특수문자 제외)
 function sanitizeText(text) {
@@ -18,8 +38,7 @@ function calculateRealtimeAccuracy(userInput, targetText) {
   const cleanInput = sanitizeText(userInput);
   const cleanTarget = sanitizeText(targetText);
 
-  if (!cleanInput) return 0;
-  if (!cleanTarget) return 0;
+  if (!cleanInput || !cleanTarget) return 0;
 
   let correctChars = 0;
   const minLen = Math.min(cleanInput.length, cleanTarget.length);
@@ -56,7 +75,10 @@ export default function TranscriptionApp() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // ★ 페이지 내에서 직관적으로 수정하는 폰트 및 글자 크기
+  // ★ 가로폭 모드: 'normal'(기본) | 'wide'(넓게) | 'full'(최대)
+  const [containerWidth, setContainerWidth] = useState('max-w-4xl');
+
+  // 스타일 설정
   const [theme, setTheme] = useState('dark');
   const [fontFamily, setFontFamily] = useState('font-sans');
   const [fontSizePx, setFontSizePx] = useState(18);
@@ -66,12 +88,12 @@ export default function TranscriptionApp() {
   // 학습 순서 (순차 vs 랜덤)
   const [isRandomMode, setIsRandomMode] = useState(false);
   
-  // 학습 모드: 'normal'(일반필사) | 'blank'(빈칸암기)
+  // ★ 3가지 학습 모드: 'normal'(일반필사) | 'chosung'(초성힌트) | 'blank'(빈칸암기)
   const [studyMode, setStudyMode] = useState('normal'); 
   const [modeTiming, setModeTiming] = useState('all'); 
   const [blankType, setBlankType] = useState('matchLength');
 
-  // 빈칸 모드용 정답 보기 토글
+  // 정답 보기 토글
   const [showFullAnswer, setShowFullAnswer] = useState(false);
 
   // 뽀모도로 타이머 상태
@@ -92,9 +114,9 @@ export default function TranscriptionApp() {
     lawData.chapters.find(ch => ch.items.some(item => item.id === selectedItemId)), [selectedItemId]
   );
 
-  // 변형 모드(빈칸) 적용 타이밍 판별
+  // 변형 모드(초성 or 빈칸) 적용 타이밍 판별
   const isSpecialModeActive = useMemo(() => {
-    if (studyMode !== 'blank') return false;
+    if (studyMode === 'normal') return false;
     if (modeTiming === 'all') return true;
     if (modeTiming === 'last') {
       return targetRepeatCount === 1 ? true : currentRepeatCount === targetRepeatCount - 1;
@@ -102,38 +124,55 @@ export default function TranscriptionApp() {
     return false;
   }, [studyMode, modeTiming, targetRepeatCount, currentRepeatCount]);
 
-  // 원문 출력 텍스트 연산 (빈칸 모드 지원)
+  // ★ [수정됨] 오류 없는 안전한 원문 출력 텍스트 연산 (일반 / 초성 / 빈칸)
   const displayedLawText = useMemo(() => {
-    if (!currentItem) return '';
-    if (showFullAnswer) return currentItem.law;
+    if (!currentItem || !currentItem.law) return '';
+    if (showFullAnswer || !isSpecialModeActive) return currentItem.law;
 
-    if (isSpecialModeActive) {
-      const words = currentItem.law.split(' ');
-      const eligibleIndices = words
-        .map((word, idx) => (word.length >= 2 ? idx : -1))
-        .filter(idx => idx !== -1);
+    const words = currentItem.law.split(' ');
+    if (words.length === 0) return currentItem.law;
 
-      if (eligibleIndices.length === 0) return currentItem.law;
-
-      const targetCount = Math.min(Math.max(2, Math.floor(eligibleIndices.length / 3)), 3);
-      const step = Math.floor(eligibleIndices.length / targetCount);
-      const maskedIndices = new Set();
-      for (let i = 0; i < targetCount; i++) {
-        maskedIndices.add(eligibleIndices[Math.min(i * step + Math.floor(step / 2), eligibleIndices.length - 1)]);
+    // 2글자 이상인 단어들만 마스킹 대상으로 추출
+    const eligibleIndices = [];
+    words.forEach((word, idx) => {
+      if (word && word.length >= 2) {
+        eligibleIndices.push(idx);
       }
+    });
 
-      return words.map((word, idx) => {
-        if (maskedIndices.has(idx)) {
-          const targetLength = Math.min(word.length, 4);
-          const restWord = word.slice(targetLength);
-          return (blankType === 'fixed' ? 'OO' : 'O'.repeat(targetLength)) + restWord;
-        }
-        return word;
-      }).join(' ');
+    if (eligibleIndices.length === 0) return currentItem.law;
+
+    // 2~3개 단어 선정
+    const targetCount = Math.min(Math.max(2, Math.floor(eligibleIndices.length / 3)), 3);
+    const step = Math.max(1, Math.floor(eligibleIndices.length / targetCount));
+    const maskedIndices = new Set();
+    
+    for (let i = 0; i < targetCount; i++) {
+      const targetIdx = eligibleIndices[Math.min(i * step + Math.floor(step / 2), eligibleIndices.length - 1)];
+      if (targetIdx !== undefined) {
+        maskedIndices.add(targetIdx);
+      }
     }
 
-    return currentItem.law;
-  }, [currentItem, isSpecialModeActive, showFullAnswer, blankType]);
+    return words.map((word, idx) => {
+      if (maskedIndices.has(idx)) {
+        const targetLength = Math.min(word.length, 4);
+        const restWord = word.slice(targetLength);
+        const maskPart = word.slice(0, targetLength);
+
+        // 초성 힌트 모드일 때
+        if (studyMode === 'chosung') {
+          return `[${getChosung(maskPart)}]` + restWord;
+        }
+        
+        // 빈칸 암기 모드일 때
+        if (studyMode === 'blank') {
+          return (blankType === 'fixed' ? 'OO' : 'O'.repeat(targetLength)) + restWord;
+        }
+      }
+      return word;
+    }).join(' ');
+  }, [currentItem, isSpecialModeActive, studyMode, showFullAnswer, blankType]);
 
   // LocalStorage 데이터 복원
   useEffect(() => {
@@ -149,6 +188,12 @@ export default function TranscriptionApp() {
     const savedFontFamily = localStorage.getItem('transcription_font_family');
     if (savedFontFamily) setFontFamily(savedFontFamily);
 
+    const savedStudyMode = localStorage.getItem('transcription_study_mode');
+    if (savedStudyMode) setStudyMode(savedStudyMode);
+
+    const savedWidth = localStorage.getItem('transcription_container_width');
+    if (savedWidth) setContainerWidth(savedWidth);
+
     const savedStudyTime = localStorage.getItem('pomo_study_time');
     if (savedStudyTime) {
       const mins = Number(savedStudyTime);
@@ -160,7 +205,7 @@ export default function TranscriptionApp() {
     if (savedRestTime) setRestTimeSetting(Number(savedRestTime));
   }, []);
 
-  // 폰트 크기 및 스타일 변경 핸들러
+  // 폰트 크기 및 스타일, 가로폭 변경 핸들러
   const handleFontSizeChange = (delta) => {
     setFontSizePx((prev) => {
       const next = Math.max(12, Math.min(32, prev + delta));
@@ -172,6 +217,23 @@ export default function TranscriptionApp() {
   const handleFontFamilyChange = (val) => {
     setFontFamily(val);
     localStorage.setItem('transcription_font_family', val);
+  };
+
+  const handleStudyModeChange = (val) => {
+    setStudyMode(val);
+    setShowFullAnswer(false);
+    localStorage.setItem('transcription_study_mode', val);
+  };
+
+  const handleToggleWidth = () => {
+    setContainerWidth((prev) => {
+      let next = 'max-w-4xl';
+      if (prev === 'max-w-4xl') next = 'max-w-6xl';
+      else if (prev === 'max-w-6xl') next = 'max-w-full';
+      else next = 'max-w-4xl';
+      localStorage.setItem('transcription_container_width', next);
+      return next;
+    });
   };
 
   // 뽀모도로 타이머
@@ -451,7 +513,7 @@ export default function TranscriptionApp() {
             ))}
           </div>
 
-          {/* 진도율 & 초기화 버튼 */}
+          {/* 진도율 & 초기화 */}
           <div className="p-4 border-t border-inherit bg-inherit space-y-2">
             <div className="flex justify-between items-center text-xs">
               <span className={`font-medium ${textMuted}`}>학습 완료 진도</span>
@@ -477,10 +539,10 @@ export default function TranscriptionApp() {
 
       {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/50 z-20 md:hidden" />}
 
-      {/* 2. 메인 화면 영역 */}
+      {/* 2. 메인 영역 */}
       <div className="flex-1 flex flex-col h-full pt-14 md:pt-0 overflow-hidden">
         
-        {/* 상단 네비게이션 헤더 */}
+        {/* 상단 헤더 */}
         <header className={`h-16 border-b border-inherit px-4 md:px-6 flex items-center justify-between shrink-0 ${bgSidebar}`}>
           <div className="flex items-center gap-3">
             {!isSidebarVisible && (
@@ -576,189 +638,224 @@ export default function TranscriptionApp() {
           </div>
         </header>
 
-        {/* 중앙 본문 영역 */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 max-w-4xl mx-auto w-full space-y-6">
+        {/* 중앙 본문 영역 (가로폭 동적 제어) */}
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 w-full space-y-6 flex flex-col items-center">
           
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-inherit pb-3">
-            <div>
-              <h2 className="text-lg md:text-xl font-bold">{currentItem?.title}</h2>
-              <p className={`text-xs mt-0.5 ${textMuted}`}>
-                {isSpecialModeActive 
-                  ? '★ 빈칸 암기 모드: 주요 빈칸 단어를 떠올리며 원문을 완성하세요.'
-                  : '원문을 올바르게 따라 쓰며 몰입 필사를 진행하세요.'}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3 self-start sm:self-auto">
-              <div className="bg-slate-500/10 px-3 py-1.5 rounded-lg border border-inherit text-xs font-medium">
-                <span className={textMuted}>누적 완수: </span>
-                <span className="font-bold text-emerald-500 font-mono">{itemStudyCounts[currentItem?.id] || 0}회</span>
-              </div>
-
-              <div className="bg-blue-500/10 px-3 py-1.5 rounded-lg border border-blue-500/20 text-xs">
-                <span className="text-blue-500 font-medium">진행: </span>
-                <span className="font-bold text-blue-600 dark:text-blue-400 font-mono text-sm">
-                  {currentRepeatCount + 1} / {targetRepeatCount} 회
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* 학습 원문 및 입력창 카드 */}
-          <div className={`p-4 md:p-6 rounded-2xl border ${bgCard} space-y-4`}>
+          <div className={`w-full ${containerWidth} space-y-6 transition-all duration-200`}>
             
-            {/* ★ [1번 요구사항] 원문 상단 인라인 서식 툴바 (폰트 선택 & 글자크기 실시간 조절) */}
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-inherit pb-3">
-              <span className="text-xs font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1.5">
-                {isSpecialModeActive ? <EyeOff className="w-4 h-4 text-amber-500" /> : <Eye className="w-4 h-4" />}
-                {isSpecialModeActive ? '학습 원문 (빈칸 모드)' : '학습 원문'}
-              </span>
-
-              {/* 실시간 폰트 및 크기 조절 컨트롤 */}
-              <div className="flex items-center gap-2">
-                
-                {/* 폰트 종류 선택 드롭다운 */}
-                <div className="flex items-center gap-1 bg-slate-500/10 px-2 py-1 rounded-lg border border-inherit text-xs">
-                  <Type className="w-3.5 h-3.5 text-slate-400" />
-                  <select
-                    value={fontFamily}
-                    onChange={(e) => handleFontFamilyChange(e.target.value)}
-                    className="bg-transparent text-xs font-medium focus:outline-none cursor-pointer"
-                  >
-                    <option value="font-sans" className="bg-slate-900 text-slate-100">고딕체</option>
-                    <option value="font-serif" className="bg-slate-900 text-slate-100">바탕체</option>
-                    <option value="font-mono" className="bg-slate-900 text-slate-100">고정폭</option>
-                  </select>
-                </div>
-
-                {/* 글자 크기 + / - 조절 */}
-                <div className="flex items-center bg-slate-500/10 rounded-lg border border-inherit p-0.5">
-                  <button
-                    onClick={() => handleFontSizeChange(-1)}
-                    className="px-2 py-0.5 rounded hover:bg-slate-500/20 text-xs font-bold transition"
-                    title="글자 작게"
-                  >
-                    A-
-                  </button>
-                  <span className="px-1.5 text-[11px] font-mono font-semibold text-blue-400">
-                    {fontSizePx}px
-                  </span>
-                  <button
-                    onClick={() => handleFontSizeChange(1)}
-                    className="px-2 py-0.5 rounded hover:bg-slate-500/20 text-xs font-bold transition"
-                    title="글자 크게"
-                  >
-                    A+
-                  </button>
-                </div>
-
-                {/* 해설 토글 버튼 */}
-                <button
-                  onClick={() => setShowExplanation(prev => !prev)}
-                  className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition font-medium select-none ${
-                    showExplanation 
-                      ? 'bg-amber-500 text-slate-950 font-bold shadow-sm' 
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                  title="단축키: TAB 키"
-                >
-                  <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
-                  <span>해설 (Tab)</span>
-                </button>
-
-                {/* 빈칸 모드일 때 정답 보기 버튼 */}
-                {isSpecialModeActive && (
-                  <button
-                    onClick={() => setShowFullAnswer(prev => !prev)}
-                    className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition font-medium select-none ${
-                      showFullAnswer 
-                        ? 'bg-emerald-500 text-slate-950 font-bold' 
-                        : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/30'
-                    }`}
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    {showFullAnswer ? '정답 숨기기' : '정답 보기'}
-                  </button>
-                )}
-              </div>
-            </div>
-            
-            {/* 원문 출력 (실시간 폰트/크기 적용) */}
-            <div 
-              className={`p-4 rounded-xl border border-inherit leading-relaxed select-none ${
-                showFullAnswer
-                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-bold'
-                  : isSpecialModeActive 
-                    ? 'bg-amber-500/10 border-amber-500/30 font-bold text-amber-600 dark:text-amber-400' 
-                    : 'bg-slate-500/5'
-              } ${fontFamily}`}
-              style={{ fontSize: `${fontSizePx}px` }}
-            >
-              {displayedLawText}
-            </div>
-
-            {/* Tab 키로 토글되는 인라인 해설 패널 */}
-            {showExplanation && (
-              <div className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 space-y-2 animate-fadeIn transition-all">
-                <div className="flex items-center justify-between text-amber-500 text-xs font-bold uppercase tracking-wider">
-                  <span className="flex items-center gap-1.5">
-                    <Lightbulb className="w-4 h-4" /> 핵심 해설 & 적용
-                  </span>
-                  <span className="text-[11px] font-normal text-amber-400/80">Tab 키를 누르면 닫힙니다</span>
-                </div>
-                <p 
-                  className={`leading-relaxed text-slate-200 ${fontFamily}`}
-                  style={{ fontSize: `${Math.max(15, fontSizePx - 1)}px` }}
-                >
-                  {currentItem?.example || '등록된 추가 해설이 없습니다.'}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-inherit pb-3">
+              <div>
+                <h2 className="text-lg md:text-xl font-bold">{currentItem?.title}</h2>
+                <p className={`text-xs mt-0.5 ${textMuted}`}>
+                  {isSpecialModeActive 
+                    ? (studyMode === 'chosung' ? '★ 초성 힌트 모드: 초성 힌트를 참고하여 원문을 완성하세요.' : '★ 빈칸 암기 모드: 주요 빈칸 단어를 떠올리며 원문을 완성하세요.')
+                    : '원문을 올바르게 따라 쓰며 몰입 필사를 진행하세요.'}
                 </p>
               </div>
-            )}
 
-            {/* 입력 영역 */}
-            <div className="space-y-2">
-              <textarea
-                value={userInput}
-                onChange={handleInputChange}
-                onKeyDown={handleKeyDown}
-                placeholder={isSpecialModeActive ? "원문 전체를 정확히 입력 후 Enter를 누르세요... (해설 확인: Tab)" : "위 원문과 일치하도록 입력 후 Enter를 누르세요... (해설 확인: Tab)"}
-                className={`w-full h-32 p-4 rounded-xl border transition focus:outline-none focus:ring-2 resize-none ${
-                  isPass 
-                    ? 'border-emerald-500 focus:ring-emerald-500/50' 
-                    : showErrorAlert 
-                      ? 'border-rose-500/80 focus:ring-rose-500/50' 
-                      : 'border-slate-700 focus:ring-blue-500/50'
-                } ${bgInput} ${fontFamily}`}
-                style={{ fontSize: `${fontSizePx}px` }}
-              />
-              
-              {isPass && (
-                <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-500 text-xs font-medium animate-bounce">
-                  <span className="flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4 shrink-0" />
-                    작성 완료! (일치율 {accuracy}%) <strong>Enter 키</strong>를 누르면 다음 문장으로 바로 이동합니다.
+              <div className="flex items-center gap-3 self-start sm:self-auto">
+                <div className="bg-slate-500/10 px-3 py-1.5 rounded-lg border border-inherit text-xs font-medium">
+                  <span className={textMuted}>누적 완수: </span>
+                  <span className="font-bold text-emerald-500 font-mono">{itemStudyCounts[currentItem?.id] || 0}회</span>
+                </div>
+
+                <div className="bg-blue-500/10 px-3 py-1.5 rounded-lg border border-blue-500/20 text-xs">
+                  <span className="text-blue-500 font-medium">진행: </span>
+                  <span className="font-bold text-blue-600 dark:text-blue-400 font-mono text-sm">
+                    {currentRepeatCount + 1} / {targetRepeatCount} 회
                   </span>
-                  <CornerDownLeft className="w-4 h-4" />
                 </div>
-              )}
-
-              {showErrorAlert && (
-                <div className="flex items-center gap-2 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-500 text-xs font-medium">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  <span>현재 문장 일치율 <strong>{accuracy}%</strong> 입니다. 오탈자를 확인해 주세요 (90% 이상 작성 후 Enter).</span>
-                </div>
-              )}
-
-              <div className="flex justify-between items-center text-xs text-slate-400 px-1">
-                <span>실시간 정확도 판별 중 (Tab: 해설 열기/닫기)</span>
-                <span className="font-mono font-medium">문자 일치율: {accuracy}%</span>
               </div>
             </div>
+
+            {/* 학습 카드 영역 */}
+            <div className={`p-4 md:p-6 rounded-2xl border ${bgCard} space-y-4`}>
+              
+              {/* 상단 통합 툴바: 모드 선택 + 폰트 + 글자크기 + 너비조절 + 해설토글 */}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-inherit pb-3">
+                
+                {/* 3가지 학습 모드 즉시 전환 탭 */}
+                <div className="flex items-center bg-slate-500/10 p-1 rounded-xl border border-inherit gap-1">
+                  {[
+                    { label: '일반 필사', val: 'normal' },
+                    { label: '초성 힌트', val: 'chosung' },
+                    { label: '빈칸 암기', val: 'blank' }
+                  ].map((m) => (
+                    <button
+                      key={m.val}
+                      onClick={() => handleStudyModeChange(m.val)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition ${
+                        studyMode === m.val ? 'bg-blue-600 text-white shadow-sm' : `${textMuted} hover:text-slate-200`
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* 우측 컨트롤 (폰트, 크기, 너비, 해설) */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  
+                  {/* 폰트 선택 */}
+                  <div className="flex items-center gap-1 bg-slate-500/10 px-2 py-1 rounded-lg border border-inherit text-xs">
+                    <Type className="w-3.5 h-3.5 text-slate-400" />
+                    <select
+                      value={fontFamily}
+                      onChange={(e) => handleFontFamilyChange(e.target.value)}
+                      className="bg-transparent text-xs font-medium focus:outline-none cursor-pointer"
+                    >
+                      <option value="font-sans" className="bg-slate-900 text-slate-100">고딕체</option>
+                      <option value="font-serif" className="bg-slate-900 text-slate-100">바탕체</option>
+                      <option value="font-mono" className="bg-slate-900 text-slate-100">고정폭</option>
+                    </select>
+                  </div>
+
+                  {/* 글자 크기 + / - */}
+                  <div className="flex items-center bg-slate-500/10 rounded-lg border border-inherit p-0.5">
+                    <button
+                      onClick={() => handleFontSizeChange(-1)}
+                      className="px-2 py-0.5 rounded hover:bg-slate-500/20 text-xs font-bold transition"
+                      title="글자 작게"
+                    >
+                      A-
+                    </button>
+                    <span className="px-1.5 text-[11px] font-mono font-semibold text-blue-400">
+                      {fontSizePx}px
+                    </span>
+                    <button
+                      onClick={() => handleFontSizeChange(1)}
+                      className="px-2 py-0.5 rounded hover:bg-slate-500/20 text-xs font-bold transition"
+                      title="글자 크게"
+                    >
+                      A+
+                    </button>
+                  </div>
+
+                  {/* 가로폭 토글 버튼 */}
+                  <button
+                    onClick={handleToggleWidth}
+                    className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-inherit hover:bg-slate-500/20 transition ${textMuted}`}
+                    title="입력창 가로폭 조절 (기본/넓게/최대)"
+                  >
+                    <StretchHorizontal className="w-3.5 h-3.5 text-blue-400" />
+                    <span className="hidden sm:inline">
+                      {containerWidth === 'max-w-4xl' ? '보통' : containerWidth === 'max-w-6xl' ? '넓게' : '최대'}
+                    </span>
+                  </button>
+
+                  {/* 해설 토글 버튼 */}
+                  <button
+                    onClick={() => setShowExplanation(prev => !prev)}
+                    className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition font-medium select-none ${
+                      showExplanation 
+                        ? 'bg-amber-500 text-slate-950 font-bold shadow-sm' 
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                    title="단축키: TAB 키"
+                  >
+                    <Lightbulb className="w-3.5 h-3.5 text-amber-400" />
+                    <span>해설 (Tab)</span>
+                  </button>
+
+                  {/* 빈칸 모드일 때 정답 보기 */}
+                  {isSpecialModeActive && studyMode === 'blank' && (
+                    <button
+                      onClick={() => setShowFullAnswer(prev => !prev)}
+                      className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition font-medium select-none ${
+                        showFullAnswer 
+                          ? 'bg-emerald-500 text-slate-950 font-bold' 
+                          : 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/30'
+                      }`}
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      {showFullAnswer ? '정답 숨기기' : '정답 보기'}
+                    </button>
+                  )}
+                </div>
+              </div>
+              
+              {/* 원문 출력 */}
+              <div 
+                className={`p-4 rounded-xl border border-inherit leading-relaxed select-none ${
+                  showFullAnswer
+                    ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-bold'
+                    : isSpecialModeActive 
+                      ? 'bg-amber-500/10 border-amber-500/30 font-bold text-amber-600 dark:text-amber-400' 
+                      : 'bg-slate-500/5'
+                } ${fontFamily}`}
+                style={{ fontSize: `${fontSizePx}px` }}
+              >
+                {displayedLawText}
+              </div>
+
+              {/* Tab 키 인라인 해설 패널 */}
+              {showExplanation && (
+                <div className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 space-y-2 animate-fadeIn transition-all">
+                  <div className="flex items-center justify-between text-amber-500 text-xs font-bold uppercase tracking-wider">
+                    <span className="flex items-center gap-1.5">
+                      <Lightbulb className="w-4 h-4" /> 핵심 해설 & 적용
+                    </span>
+                    <span className="text-[11px] font-normal text-amber-400/80">Tab 키를 누르면 닫힙니다</span>
+                  </div>
+                  <p 
+                    className={`leading-relaxed text-slate-200 ${fontFamily}`}
+                    style={{ fontSize: `${Math.max(15, fontSizePx - 1)}px` }}
+                  >
+                    {currentItem?.example || '등록된 추가 해설이 없습니다.'}
+                  </p>
+                </div>
+              )}
+
+              {/* 입력 영역 (자유 리사이징 지원: resize: both) */}
+              <div className="space-y-2">
+                <textarea
+                  value={userInput}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder={
+                    isSpecialModeActive
+                      ? (studyMode === 'chosung' ? "초성 힌트를 참고하여 원문 전체를 입력 후 Enter를 누르세요..." : "빈칸을 채워 원문 전체를 입력 후 Enter를 누르세요...")
+                      : "위 원문과 일치하도록 입력 후 Enter를 누르세요... (해설 확인: Tab)"
+                  }
+                  className={`w-full min-h-[140px] p-4 rounded-xl border transition focus:outline-none focus:ring-2 ${
+                    isPass 
+                      ? 'border-emerald-500 focus:ring-emerald-500/50' 
+                      : showErrorAlert 
+                        ? 'border-rose-500/80 focus:ring-rose-500/50' 
+                        : 'border-slate-700 focus:ring-blue-500/50'
+                  } ${bgInput} ${fontFamily}`}
+                  style={{ fontSize: `${fontSizePx}px`, resize: 'both' }}
+                />
+                
+                {isPass && (
+                  <div className="flex items-center justify-between p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-500 text-xs font-medium animate-bounce">
+                    <span className="flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 shrink-0" />
+                      작성 완료! (일치율 {accuracy}%) <strong>Enter 키</strong>를 누르면 다음 문장으로 바로 이동합니다.
+                    </span>
+                    <CornerDownLeft className="w-4 h-4" />
+                  </div>
+                )}
+
+                {showErrorAlert && (
+                  <div className="flex items-center gap-2 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-500 text-xs font-medium">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>현재 문장 일치율 <strong>{accuracy}%</strong> 입니다. 오탈자를 확인해 주세요 (90% 이상 작성 후 Enter).</span>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center text-xs text-slate-400 px-1">
+                  <span>우측 하단을 드래그하여 입력창 크기(가로/세로)를 자유롭게 조절할 수 있습니다.</span>
+                  <span className="font-mono font-medium">문자 일치율: {accuracy}%</span>
+                </div>
+              </div>
+            </div>
+
           </div>
 
         </main>
 
-        {/* ★ [2번 요구사항] 사이드바와 겹치지 않는 메인 영역 내부 단축키 푸터 바 */}
+        {/* 단축키 푸터 바 */}
         <footer className={`h-11 border-t border-inherit px-6 flex items-center justify-between shrink-0 text-xs ${bgSidebar}`}>
           <div className="flex items-center gap-4 text-slate-400 overflow-x-auto py-1">
             <span className="flex items-center gap-1 font-semibold text-blue-400 shrink-0">
@@ -788,7 +885,7 @@ export default function TranscriptionApp() {
 
             <div className="space-y-5 text-xs md:text-sm">
               
-              {/* 학습 진도 초기화 버튼 */}
+              {/* 학습 진도 초기화 */}
               <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center justify-between">
                 <div>
                   <span className="font-bold text-rose-400 block">오늘의 학습 진행도 초기화</span>
@@ -805,17 +902,18 @@ export default function TranscriptionApp() {
                 </button>
               </div>
 
-              {/* 기본 학습 모드 선택 (일반 필사 vs 빈칸 암기) */}
+              {/* 기본 학습 모드 선택 (일반 / 초성 / 빈칸) */}
               <div className="space-y-2">
                 <label className="font-semibold block text-blue-400">기본 학습 모드</label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {[
                     { label: '일반 필사', val: 'normal' },
-                    { label: '빈칸 암기 모드', val: 'blank' }
+                    { label: '초성 힌트', val: 'chosung' },
+                    { label: '빈칸 암기', val: 'blank' }
                   ].map((mode) => (
                     <button
                       key={mode.val}
-                      onClick={() => setStudyMode(mode.val)}
+                      onClick={() => handleStudyModeChange(mode.val)}
                       className={`p-2.5 rounded-xl border text-center transition ${
                         studyMode === mode.val ? 'border-blue-500 bg-blue-500/10 font-bold text-blue-500' : 'border-inherit'
                       }`}
@@ -826,9 +924,9 @@ export default function TranscriptionApp() {
                 </div>
               </div>
 
-              {studyMode === 'blank' && (
+              {studyMode !== 'normal' && (
                 <div className="space-y-2 bg-slate-500/5 p-3 rounded-xl border border-inherit">
-                  <label className="font-semibold block">빈칸 모드 적용 시점</label>
+                  <label className="font-semibold block">암기 모드 적용 시점</label>
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     <button
                       onClick={() => setModeTiming('all')}
